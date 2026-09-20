@@ -28,15 +28,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem = item
 
         if let button = item.button {
-            // An icon means the item stays findable even when the title is
-            // short, and identifiable among a crowded menu bar.
+            // Icon only. A score in the title made the item ~99pt wide, which
+            // on a full menu bar pushed it into the overflow drawer behind the
+            // "»" chevron. The icon alone stays in the bar itself; the score
+            // lives in the dropdown, and in the tooltip on hover.
             button.image = NSImage(systemSymbolName: "sportscourt.fill",
                                    accessibilityDescription: "MenuScores")
-            button.imagePosition = .imageLeading
-            button.title = " " + MenuBarTitle.loading
+            button.imagePosition = .imageOnly
+            button.title = ""
             button.target = self
             button.action = #selector(togglePopover(_:))
-            button.toolTip = "MenuScores — click for today's games"
+            button.toolTip = "MenuScores"
         }
 
         let popover = NSPopover()
@@ -84,7 +86,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Timer.scheduledTimer(withTimeInterval: 8, repeats: false) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self else { return }
-                diag("title now: \"\(self.statusItem?.button?.title ?? "nil")\"")
+                let w = self.statusItem?.button?.frame.width ?? 0
+                diag("item width: \(Int(w))pt, tooltip: \"\(self.statusItem?.button?.toolTip ?? "nil")\"")
                 diag("sections: \(self.store.sections.count), "
                      + "games: \(self.store.sections.reduce(0) { $0 + $1.games.count })")
                 self.togglePopover(nil)
@@ -107,16 +110,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    /// The title tracks the pinned game. A one-second tick is cheap and avoids
-    /// tying menu bar text to the observation graph.
+    /// The tooltip tracks the pinned game, so hovering still surfaces the
+    /// score without the item taking any menu bar width. A 5-second tick is
+    /// ample for text only revealed on hover.
     private func startTitleUpdates() {
-        let timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+        let timer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self, let button = self.statusItem?.button else { return }
                 let text = MenuBarTitle.text(for: self.store.pinned,
                                              zone: self.store.zone,
                                              hasLoaded: self.store.hasLoaded)
-                if button.title != " " + text { button.title = " " + text }
+                let tip = "MenuScores — " + text
+                if button.toolTip != tip { button.toolTip = tip }
             }
         }
         RunLoop.main.add(timer, forMode: .common)
@@ -129,8 +134,10 @@ struct MenuScoresApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
 
     var body: some Scene {
-        // The status item is created by the delegate; this scene stays empty
-        // so no window is ever shown.
-        Settings { EmptyView() }
+        // The real settings live here, in the standard macOS Settings window.
+        // This was EmptyView(), which is why Settings opened blank.
+        Settings {
+            SettingsView(store: delegate.store)
+        }
     }
 }

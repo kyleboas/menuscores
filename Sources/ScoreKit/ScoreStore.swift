@@ -93,6 +93,35 @@ public final class ScoreStore {
             .min { $0.start < $1.start }
     }
 
+    // MARK: - Teams, for picking favourites
+
+    /// Team rosters per league, loaded on demand by the settings window.
+    public private(set) var teamsByLeague: [String: [Team]] = [:]
+    public private(set) var loadingTeams = false
+
+    public func loadTeams() async {
+        guard !loadingTeams else { return }
+        loadingTeams = true
+        defer { loadingTeams = false }
+        for league in preferences.leagues where teamsByLeague[league.id] == nil {
+            if let teams = try? await provider.teams(in: league) {
+                teamsByLeague[league.id] = teams
+            }
+        }
+    }
+
+    public func isFavorite(_ team: Team) -> Bool {
+        preferences.favoriteTeamIDs.contains(team.id)
+    }
+
+    public func toggleFavorite(_ team: Team) {
+        if preferences.favoriteTeamIDs.contains(team.id) {
+            preferences.favoriteTeamIDs.remove(team.id)
+        } else {
+            preferences.favoriteTeamIDs.insert(team.id)
+        }
+    }
+
     // MARK: - Refresh
 
     public func start() {

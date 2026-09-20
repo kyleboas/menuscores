@@ -71,6 +71,31 @@ public struct ESPNProvider: ScoreProvider {
         return Set(days)
     }
 
+    public func teams(in league: League) async throws -> [Team] {
+        guard let url = URL(string: "\(base)/\(league.sport)/\(league.id)/teams") else {
+            throw ProviderError.malformed("bad URL")
+        }
+        let json = try await fetch(url)
+        guard let sports = json["sports"] as? [[String: Any]],
+              let leagues = sports.first?["leagues"] as? [[String: Any]],
+              let entries = leagues.first?["teams"] as? [[String: Any]] else {
+            throw ProviderError.malformed("no teams in response")
+        }
+        return entries.compactMap { entry -> Team? in
+            guard let t = entry["team"] as? [String: Any] else { return nil }
+            let id = (t["id"] as? String) ?? ""
+            let name = (t["shortDisplayName"] as? String)
+                ?? (t["displayName"] as? String) ?? "—"
+            let abbr = (t["abbreviation"] as? String) ?? String(name.prefix(3)).uppercased()
+            // The teams endpoint nests logos in an array rather than a `logo`.
+            let logo = (t["logo"] as? String)
+                ?? ((t["logos"] as? [[String: Any]])?.first?["href"] as? String)
+            return Team(id: id, name: name, abbreviation: abbr,
+                        crest: logo.flatMap(URL.init(string:)))
+        }
+        .sorted { $0.name < $1.name }
+    }
+
     // MARK: - Parsing
 
     /// ESPN emits "2026-09-20T13:00Z" (no seconds) and occasionally

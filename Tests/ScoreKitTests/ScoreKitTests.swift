@@ -29,6 +29,11 @@ private final class FakeProvider: ScoreProvider, @unchecked Sendable {
         if let f = failure { throw f }
         return calendar
     }
+    var teamsByLeague: [String: [Team]] = [:]
+    func teams(in league: League) async throws -> [Team] {
+        if let f = failure { throw f }
+        return teamsByLeague[league.id] ?? []
+    }
 }
 
 final class DateParsingTests: XCTestCase {
@@ -500,5 +505,64 @@ final class MenuBarFallbackTests: XCTestCase {
         let t = MenuBarTitle.text(for: g, zone: TimeZone(secondsFromGMT: 0)!)
         XCTAssertTrue(t.contains("2–1"), "the score must survive truncation, got \(t)")
         XCTAssertLessThanOrEqual(t.count, MenuBarTitle.maxLength)
+    }
+}
+
+@MainActor
+final class FavoritesTests: XCTestCase {
+    private let zone = TimeZone(identifier: "America/New_York")!
+
+    private func store(_ p: FakeProvider) -> ScoreStore {
+        ScoreStore(provider: p,
+                   preferences: Preferences(enabledLeagueIDs: ["eng.1"]),
+                   zone: zone,
+                   now: { ESPNProvider.date(from: "2026-09-20T18:00Z")! })
+    }
+
+    func testLoadsTeamsForEnabledLeagues() async {
+        let p = FakeProvider()
+        p.teamsByLeague["eng.1"] = [team("1", "ARS"), team("2", "LIV")]
+        let s = store(p)
+        await s.loadTeams()
+        XCTAssertEqual(s.teamsByLeague["eng.1"]?.count, 2)
+    }
+
+    func testTogglingAFavouriteIsReflectedAndPersists() async {
+        let p = FakeProvider()
+        let arsenal = team("1", "ARS")
+        p.teamsByLeague["eng.1"] = [arsenal]
+        let s = store(p)
+        await s.loadTeams()
+
+        XCTAssertFalse(s.isFavorite(arsenal))
+        s.toggleFavorite(arsenal)
+        XCTAssertTrue(s.isFavorite(arsenal))
+        XCTAssertTrue(s.preferences.favoriteTeamIDs.contains(arsenal.id))
+        s.toggleFavorite(arsenal)
+        XCTAssertFalse(s.isFavorite(arsenal))
+    }
+
+    func testFavouritesOnlyHidesOtherGamesImmediately() async {
+        let p = FakeProvider()
+        let s = store(p)
+        let keep = game("keep", at: "2026-09-20T17:00Z", state: .live)
+        p.byDay[s.today] = [keep, game("drop", at: "2026-09-20T17:30Z", state: .live)]
+        await s.refresh()
+        XCTAssertEqual(s.sections.first?.games.count, 2)
+
+        s.toggleFavorite(keep.home)
+        s.preferences.favoritesOnly = true
+        XCTAssertEqual(s.sections.first?.games.map(\.id), ["keep"],
+                       "filtering must apply without waiting for a refetch")
+    }
+
+    func testTeamsAreOnlyFetchedOncePerLeague() async {
+        let p = FakeProvider()
+        p.teamsByLeague["eng.1"] = [team("1", "ARS")]
+        let s = store(p)
+        await s.loadTeams()
+        p.teamsByLeague["eng.1"] = []      // a second fetch would blank it
+        await s.loadTeams()
+        XCTAssertEqual(s.teamsByLeague["eng.1"]?.count, 1)
     }
 }

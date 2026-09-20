@@ -5,7 +5,9 @@ import ScoreKit
 public struct DropdownView: View {
     @Bindable var store: ScoreStore
     public init(store: ScoreStore) { self.store = store }
-    @State private var showingSettings = false
+    /// Opens the real Settings window. A sheet presented from inside the
+    /// popover never appeared, which is why Settings looked blank.
+    @Environment(\.openSettings) private var openSettings
     /// Drives the "updated N seconds ago" line without re-fetching anything.
     @State private var tick = Date()
 
@@ -28,9 +30,6 @@ public struct DropdownView: View {
         }
         .frame(width: 340)
         .onReceive(ticker) { tick = $0 }
-        .sheet(isPresented: $showingSettings) {
-            SettingsView(store: store, isPresented: $showingSettings)
-        }
     }
 
     // Freshness is always on screen, so a cached score can never read as live.
@@ -62,7 +61,7 @@ public struct DropdownView: View {
 
     private var footer: some View {
         HStack {
-            Button("Settings…") { showingSettings = true }
+            Button("Settings…") { openSettings() }
                 .buttonStyle(.plain).font(.system(size: 11))
             Spacer()
             Button("Quit") { NSApplication.shared.terminate(nil) }

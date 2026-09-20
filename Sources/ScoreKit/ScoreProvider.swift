@@ -15,6 +15,9 @@ public protocol ScoreProvider: Sendable {
     /// means "unknown, ask day by day" — MLB's calendar is not a complete index,
     /// so callers must treat this as an optimization only, never as truth.
     func fixtureDays(from: CivilDay, through: CivilDay, league: League, zone: TimeZone) async throws -> Set<CivilDay>?
+    /// Every team in a league, for picking favourites. Not limited to teams
+    /// playing today.
+    func teams(in league: League) async throws -> [Team]
 }
 
 /// A calendar date with no time zone attached. Using this instead of `Date`
