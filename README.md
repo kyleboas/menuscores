@@ -32,7 +32,9 @@ to Login Items. Updates are manual by design: rebuild and replace.
 ## What it does
 
 - **Menu bar** — one pinned line: the live score while a game is on, otherwise
-  the next matchup and its start time in your zone.
+  the next matchup and its start time in your zone. Reads "Scores…" until the
+  first fetch lands and "No games" when nothing is on, never a bare glyph, and
+  is capped at 22 characters so it survives a notched display.
 - **Dropdown** — a day strip (Yesterday / Today / Tomorrow, two days back and
   seven forward), with the selected day's games grouped into collapsible
   league cards: badge, "England - Premier League", then a row per game as
@@ -45,7 +47,8 @@ to Login Items. Updates are manual by design: rebuild and replace.
 - **Refresh** — 30s while a game is live, 2min within an hour of kickoff,
   15min otherwise, with exponential backoff capped at 10min while failing.
   Days are cached individually: the fast live tick refetches only today, since
-  that is the only day whose scores can change.
+  that is the only day whose scores can change. Polling starts at launch (from
+  the app delegate, not the dropdown) and restarts on wake from sleep.
 
 Deliberately absent: notch handling, news, video, betting odds, cloud sync,
 auto-update.

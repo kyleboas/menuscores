@@ -107,6 +107,10 @@ public final class ScoreStore {
         games(on: today).filter(\.isLive).sorted(by: Self.rowOrder)
     }
 
+    /// Whether any refresh has completed, so the menu bar can tell
+    /// "starting up" apart from "nothing on today".
+    public var hasLoaded: Bool { freshness.lastSuccess != nil }
+
     /// Menu bar line: a live game if there is one, else today's next kickoff,
     /// else tomorrow's first.
     public var pinned: Game? {

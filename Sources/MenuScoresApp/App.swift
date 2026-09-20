@@ -1,30 +1,51 @@
 import SwiftUI
+import AppKit
 import ScoreKit
 
-@main
-struct MenuScoresApp: App {
-    @State private var store = ScoreStore()
-    @Environment(\.scenePhase) private var phase
+/// The store is owned by the app delegate, not by the dropdown.
+///
+/// With `.menuBarExtraStyle(.window)` the dropdown's content view is not
+/// created until the user actually opens it. Starting the refresh loop from
+/// that view therefore meant nothing was ever fetched until the first click,
+/// and the menu bar sat on its placeholder. Polling has to begin at launch.
+@MainActor
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    let store = ScoreStore()
 
-    var body: some Scene {
-        MenuBarExtra {
-            DropdownView(store: store)
-        } label: {
-            Text(MenuBarTitle.text(for: store.pinned, zone: store.zone))
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        store.start()
+
+        // Waking from sleep leaves whatever we last fetched on screen, which
+        // may be hours old. Refresh immediately rather than waiting out the
+        // remainder of the poll interval.
+        NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didWakeNotification,
+            object: nil, queue: .main
+        ) { [store] _ in
+            MainActor.assumeIsolated {
+                store.selectedDay = CivilDay.today(in: store.zone)
+                store.start()       // restart the cadence from now
+            }
         }
-        .menuBarExtraStyle(.window)
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        store.stop()
     }
 }
 
-enum Format {
-    static func clock(_ d: Date) -> String { MenuBarTitle.clock(d) }
+@main
+struct MenuScoresApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
 
-    static func dayHeading(_ day: CivilDay, zone: TimeZone, now: Date = Date()) -> String {
-        let today = CivilDay.today(in: zone, now: now)
-        if day == today.adding(days: 1, in: zone) { return "Tomorrow" }
-        let f = DateFormatter()
-        f.timeZone = zone
-        f.dateFormat = "EEEE d MMM"
-        return f.string(from: day.startOfDay(in: zone))
+    var body: some Scene {
+        MenuBarExtra {
+            DropdownView(store: delegate.store)
+        } label: {
+            Text(MenuBarTitle.text(for: delegate.store.pinned,
+                                   zone: delegate.store.zone,
+                                   hasLoaded: delegate.store.hasLoaded))
+        }
+        .menuBarExtraStyle(.window)
     }
 }

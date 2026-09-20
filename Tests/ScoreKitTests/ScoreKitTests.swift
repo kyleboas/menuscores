@@ -436,8 +436,11 @@ final class MenuBarTitleTests: XCTestCase {
          .replacingOccurrences(of: "\u{00A0}", with: " ")
     }
 
-    func testNoGameShowsPlaceholder() {
-        XCTAssertEqual(MenuBarTitle.text(for: nil), "—")
+    func testNoGameShowsAReadableFallbackNotAGlyph() {
+        // Covered in depth by MenuBarFallbackTests; pinned here so the menu bar
+        // can never regress to a bare dash.
+        XCTAssertEqual(MenuBarTitle.text(for: nil), MenuBarTitle.idle)
+        XCTAssertGreaterThan(MenuBarTitle.text(for: nil).count, 1)
     }
 
     func testLiveGameShowsScoreAndClock() {
@@ -464,5 +467,33 @@ final class MenuBarTitleTests: XCTestCase {
     func testLiveGameWithoutDetailDoesNotGainTrailingSpace() {
         let g = game("l", at: "2026-09-20T13:00Z", state: .live, h: 0, a: 0, detail: "")
         XCTAssertEqual(MenuBarTitle.text(for: g, zone: utc), "HOM 0–0 AWY")
+    }
+}
+
+final class MenuBarFallbackTests: XCTestCase {
+    func testBeforeFirstFetchSaysLoadingNotABareDash() {
+        // A lone glyph in the menu bar reads as a broken item.
+        XCTAssertEqual(MenuBarTitle.text(for: nil, hasLoaded: false), "Scores…")
+    }
+
+    func testAfterFetchWithNoGamesSaysSo() {
+        XCTAssertEqual(MenuBarTitle.text(for: nil, hasLoaded: true), "No games")
+    }
+
+    func testLongLineIsTruncatedAtAWordBoundary() {
+        let t = MenuBarTitle.truncate("VILLARREAL 2–1 LEVANTE 90'+5'")
+        XCTAssertLessThanOrEqual(t.count, MenuBarTitle.maxLength)
+        XCTAssertFalse(t.hasSuffix(" "))
+    }
+
+    func testShortLineIsLeftAlone() {
+        XCTAssertEqual(MenuBarTitle.truncate("VIL 2–1 LEV"), "VIL 2–1 LEV")
+    }
+
+    func testTruncationKeepsTheScoreRatherThanTheClock() {
+        let g = game("l", at: "2026-09-20T13:00Z", state: .live, h: 2, a: 1, detail: "90'+5'")
+        let t = MenuBarTitle.text(for: g, zone: TimeZone(secondsFromGMT: 0)!)
+        XCTAssertTrue(t.contains("2–1"), "the score must survive truncation, got \(t)")
+        XCTAssertLessThanOrEqual(t.count, MenuBarTitle.maxLength)
     }
 }

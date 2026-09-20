@@ -1,4 +1,5 @@
 import SwiftUI
+import Combine
 import ScoreKit
 
 struct DropdownView: View {
@@ -37,7 +38,6 @@ struct DropdownView: View {
         }
         .frame(width: 340)
         .onReceive(ticker) { tick = $0 }
-        .task { store.start() }
         .sheet(isPresented: $showingSettings) {
             SettingsView(store: store, isPresented: $showingSettings)
         }
