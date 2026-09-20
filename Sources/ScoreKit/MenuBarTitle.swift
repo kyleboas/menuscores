@@ -46,11 +46,13 @@ public enum MenuBarTitle {
         return String(s.prefix(maxLength - 1)) + "…"
     }
 
+    /// 24-hour, always. A fixed format needs the POSIX locale: with the
+    /// user's own locale a 12-hour region can still force an AM/PM suffix.
     public static func clock(_ d: Date, zone: TimeZone = .current) -> String {
         let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
         f.timeZone = zone
-        f.timeStyle = .short
-        f.dateStyle = .none
+        f.dateFormat = "HH:mm"
         return f.string(from: d)
     }
 }

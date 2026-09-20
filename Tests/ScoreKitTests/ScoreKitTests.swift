@@ -514,13 +514,36 @@ final class MenuBarTitleTests: XCTestCase {
 
     func testScheduledGameShowsMatchupAndStartTime() {
         let g = game("s", at: "2026-09-20T13:00Z", state: .scheduled)
-        XCTAssertEqual(norm(MenuBarTitle.text(for: g, zone: utc)), "HOM v AWY 1:00 PM")
+        XCTAssertEqual(norm(MenuBarTitle.text(for: g, zone: utc)), "HOM v AWY 13:00")
     }
 
     func testStartTimeIsRenderedInTheUsersZone() {
         let g = game("s", at: "2026-09-20T13:00Z", state: .scheduled)
         let ny = norm(MenuBarTitle.text(for: g, zone: TimeZone(identifier: "America/New_York")!))
-        XCTAssertTrue(ny.contains("9:00 AM"), "expected local kickoff time, got \(ny)")
+        XCTAssertTrue(ny.contains("09:00"), "expected local kickoff time, got \(ny)")
+    }
+
+    func testClockIs24HourWithNoMeridiem() {
+        let utc = TimeZone(secondsFromGMT: 0)!
+        let afternoon = ESPNProvider.date(from: "2026-09-20T15:00Z")!
+        let morning = ESPNProvider.date(from: "2026-09-20T09:05Z")!
+        let midnight = ESPNProvider.date(from: "2026-09-20T00:30Z")!
+        XCTAssertEqual(MenuBarTitle.clock(afternoon, zone: utc), "15:00")
+        XCTAssertEqual(MenuBarTitle.clock(morning, zone: utc), "09:05",
+                       "morning times stay zero-padded")
+        XCTAssertEqual(MenuBarTitle.clock(midnight, zone: utc), "00:30",
+                       "midnight is 00:xx, not 12:xx")
+        for t in [afternoon, morning, midnight] {
+            let s = MenuBarTitle.clock(t, zone: utc).uppercased()
+            XCTAssertFalse(s.contains("AM") || s.contains("PM"), "got \(s)")
+        }
+    }
+
+    func testClockIgnoresA12HourLocale() {
+        // en_US is a 12-hour region; the format must not pick that up.
+        let utc = TimeZone(secondsFromGMT: 0)!
+        let d = ESPNProvider.date(from: "2026-09-20T20:45Z")!
+        XCTAssertEqual(MenuBarTitle.clock(d, zone: utc), "20:45")
     }
 
     func testPostponedGameIsMarkedNotScored() {

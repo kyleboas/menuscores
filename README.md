@@ -60,7 +60,7 @@ to Login Items. Updates are manual by design: rebuild and replace.
 ## What it does
 
 - **Menu bar** — one pinned line: the live score while a game is on, otherwise
-  the next matchup and its start time in your zone. Reads "Scores…" until the
+  the next matchup and its start time in your zone, on a 24-hour clock. Reads "Scores…" until the
   first fetch lands and "No games" when nothing is on, never a bare glyph, and
   is capped at 22 characters so it survives a notched display.
 - **Dropdown** — a day strip (Yesterday / Today / Tomorrow, two days back and
