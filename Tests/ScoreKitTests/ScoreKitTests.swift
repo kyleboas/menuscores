@@ -166,71 +166,138 @@ final class ScoreStoreTests: XCTestCase {
     private let zone = TimeZone(identifier: "America/New_York")!
 
     private func makeStore(_ p: FakeProvider, now: Date) -> ScoreStore {
-        let store = ScoreStore(provider: p,
-                               preferences: Preferences(enabledLeagueIDs: ["eng.1"]),
-                               now: { now })
-        store.zone = zone
-        return store
+        ScoreStore(provider: p,
+                   preferences: Preferences(enabledLeagueIDs: ["eng.1"]),
+                   zone: zone,
+                   now: { now })
     }
 
-    func testBucketsLiveTodayAndUpcoming() async {
-        let now = ESPNProvider.date(from: "2026-09-20T18:00Z")!  // 2pm NY
-        let today = CivilDay(now, in: zone)
+    func testDayStripSpansPastAndFuture() {
+        let now = ESPNProvider.date(from: "2026-09-20T18:00Z")!
+        let store = makeStore(FakeProvider(), now: now)
+        let strip = store.dayStrip
+        XCTAssertEqual(strip.count, store.pastDays + store.futureDays + 1)
+        XCTAssertEqual(store.label(for: store.today), "Today")
+        XCTAssertEqual(store.label(for: strip.first!), "Fri 18 Sep")
+        XCTAssertTrue(strip.contains(store.today))
+    }
+
+    func testRelativeDayLabels() {
+        let now = ESPNProvider.date(from: "2026-09-20T18:00Z")!
+        let store = makeStore(FakeProvider(), now: now)
+        let t = store.today
+        XCTAssertEqual(store.label(for: t.adding(days: -1, in: zone)), "Yesterday")
+        XCTAssertEqual(store.label(for: t.adding(days: 1, in: zone)), "Tomorrow")
+        XCTAssertEqual(store.label(for: t.adding(days: 2, in: zone)), "Tue 22 Sep")
+    }
+
+    func testSelectedDayDrivesSections() async {
+        let now = ESPNProvider.date(from: "2026-09-20T18:00Z")!
         let p = FakeProvider()
-        p.byDay[today] = [
-            game("live", at: "2026-09-20T17:00Z", state: .live, h: 1, a: 0, detail: "62'"),
-            game("later", at: "2026-09-20T23:00Z", state: .scheduled),
-        ]
-        p.byDay[today.adding(days: 2, in: zone)] = [game("future", at: "2026-09-22T18:00Z")]
-
         let store = makeStore(p, now: now)
-        await store.refresh()
+        let t = store.today
+        let tomorrow = t.adding(days: 1, in: zone)
+        p.byDay[t] = [game("today", at: "2026-09-20T23:00Z", state: .scheduled)]
+        p.byDay[tomorrow] = [game("tmrw", at: "2026-09-21T23:00Z", state: .scheduled)]
 
-        XCTAssertEqual(store.live.map(\.id), ["live"])
-        XCTAssertEqual(store.today.map(\.id), ["later"])
-        XCTAssertEqual(store.upcoming.count, 1)
-        XCTAssertEqual(store.upcoming.first?.games.map(\.id), ["future"])
-        XCTAssertFalse(store.freshness.isFailing)
+        await store.refresh()
+        XCTAssertEqual(store.sections.flatMap { $0.games }.map(\.id), ["today"])
+
+        store.selectedDay = tomorrow
+        await store.load(days: [tomorrow])
+        XCTAssertEqual(store.sections.flatMap { $0.games }.map(\.id), ["tmrw"])
+    }
+
+    func testYesterdayIsFetchable() async {
+        let now = ESPNProvider.date(from: "2026-09-20T18:00Z")!
+        let p = FakeProvider()
+        let store = makeStore(p, now: now)
+        let yesterday = store.today.adding(days: -1, in: zone)
+        p.byDay[yesterday] = [game("y", at: "2026-09-19T23:00Z", state: .final, h: 2, a: 0)]
+
+        store.selectedDay = yesterday
+        await store.load(days: [yesterday])
+        XCTAssertEqual(store.games(on: yesterday).map(\.id), ["y"])
+    }
+
+    func testSectionsGroupByLeagueInPreferenceOrder() async {
+        let now = ESPNProvider.date(from: "2026-09-20T18:00Z")!
+        let p = FakeProvider()
+        let store = ScoreStore(provider: p,
+                               preferences: Preferences(enabledLeagueIDs: ["eng.1", "esp.1"]),
+                               zone: zone, now: { now })
+        let t = store.today
+        let esp = League.named("esp.1")!
+        let spanish = Game(id: "es", league: esp,
+                           start: ESPNProvider.date(from: "2026-09-20T19:00Z")!,
+                           state: .live, home: team("h1", "GET"), away: team("a1", "MAL"),
+                           homeScore: 1, awayScore: 0, statusDetail: "68'")
+        p.byDay[t] = [spanish, game("en", at: "2026-09-20T20:00Z", state: .scheduled)]
+
+        await store.refresh()
+        XCTAssertEqual(store.sections.map { $0.league.id }, ["eng.1", "esp.1"],
+                       "sections must follow the league list, not arrival order")
+    }
+
+    func testLiveGamesSortAboveScheduledWithinASection() async {
+        let now = ESPNProvider.date(from: "2026-09-20T18:00Z")!
+        let p = FakeProvider()
+        let store = makeStore(p, now: now)
+        p.byDay[store.today] = [
+            game("early", at: "2026-09-20T12:00Z", state: .scheduled),
+            game("live", at: "2026-09-20T17:00Z", state: .live, h: 1, a: 1, detail: "70'"),
+        ]
+        await store.refresh()
+        XCTAssertEqual(store.sections.first?.games.map(\.id), ["live", "early"])
     }
 
     func testPinnedPrefersLiveGame() async {
         let now = ESPNProvider.date(from: "2026-09-20T18:00Z")!
-        let today = CivilDay(now, in: zone)
         let p = FakeProvider()
-        p.byDay[today] = [
+        let store = makeStore(p, now: now)
+        p.byDay[store.today] = [
             game("later", at: "2026-09-20T23:00Z", state: .scheduled),
             game("live", at: "2026-09-20T17:00Z", state: .live, h: 2, a: 2),
         ]
-        let store = makeStore(p, now: now)
         await store.refresh()
         XCTAssertEqual(store.pinned?.id, "live")
     }
 
+    func testPinnedFallsBackToTomorrowWhenTodayIsDone() async {
+        let now = ESPNProvider.date(from: "2026-09-20T18:00Z")!
+        let p = FakeProvider()
+        let store = makeStore(p, now: now)
+        p.byDay[store.today] = [game("done", at: "2026-09-20T12:00Z", state: .final, h: 1, a: 0)]
+        p.byDay[store.today.adding(days: 1, in: zone)] =
+            [game("next", at: "2026-09-21T15:00Z", state: .scheduled)]
+        await store.refresh()
+        XCTAssertEqual(store.pinned?.id, "next")
+    }
+
     func testLostConnectionKeepsCacheAndFlagsFailure() async {
         let now = ESPNProvider.date(from: "2026-09-20T18:00Z")!
-        let today = CivilDay(now, in: zone)
         let p = FakeProvider()
-        p.byDay[today] = [game("g1", at: "2026-09-20T17:00Z", state: .live, h: 1, a: 0)]
-
         let store = makeStore(p, now: now)
+        p.byDay[store.today] = [game("g1", at: "2026-09-20T17:00Z", state: .live, h: 1, a: 0)]
+
         await store.refresh()
-        XCTAssertEqual(store.games.count, 1)
+        XCTAssertEqual(store.games(on: store.today).count, 1)
         XCTAssertFalse(store.freshness.isFailing)
 
         p.failure = .transport("offline")
         await store.refresh()
 
-        XCTAssertEqual(store.games.count, 1, "cached games must survive a failed refresh")
+        XCTAssertEqual(store.games(on: store.today).count, 1,
+                       "cached games must survive a failed refresh")
         XCTAssertTrue(store.freshness.isFailing, "failure must be visible")
         XCTAssertNotNil(store.freshness.warning(now: now), "stale cache must carry a warning")
     }
 
     func testRecoveryClearsWarning() async {
         let now = ESPNProvider.date(from: "2026-09-20T18:00Z")!
-        let today = CivilDay(now, in: zone)
         let p = FakeProvider()
-        p.byDay[today] = [game("g1", at: "2026-09-20T17:00Z", state: .live)]
         let store = makeStore(p, now: now)
+        p.byDay[store.today] = [game("g1", at: "2026-09-20T17:00Z", state: .live)]
         p.failure = .badStatus(400)
         await store.refresh()
         XCTAssertTrue(store.freshness.isFailing)
@@ -243,58 +310,119 @@ final class ScoreStoreTests: XCTestCase {
 
     func testPostponedGameIsNotShownAsLive() async {
         let now = ESPNProvider.date(from: "2026-09-20T18:00Z")!
-        let today = CivilDay(now, in: zone)
         let p = FakeProvider()
-        p.byDay[today] = [game("ppd", at: "2026-09-20T17:00Z", state: .postponed, detail: "Postponed")]
         let store = makeStore(p, now: now)
+        p.byDay[store.today] = [game("ppd", at: "2026-09-20T17:00Z",
+                                     state: .postponed, detail: "Postponed")]
         await store.refresh()
         XCTAssertTrue(store.live.isEmpty)
-        XCTAssertEqual(store.today.map(\.id), ["ppd"])
-    }
-
-    func testCalendarNeverSkipsToday() async {
-        // A calendar that omits today must not stop us fetching today's live games.
-        let now = ESPNProvider.date(from: "2026-09-20T18:00Z")!
-        let today = CivilDay(now, in: zone)
-        let p = FakeProvider()
-        p.calendar = [today.adding(days: 3, in: zone)]
-        p.byDay[today] = [game("live", at: "2026-09-20T17:00Z", state: .live)]
-        let store = makeStore(p, now: now)
-        await store.refresh()
-        XCTAssertEqual(store.live.map(\.id), ["live"])
+        XCTAssertEqual(store.sections.first?.games.map(\.id), ["ppd"])
     }
 
     func testDeduplicatesGamesSeenTwice() async {
         let now = ESPNProvider.date(from: "2026-09-20T18:00Z")!
-        let today = CivilDay(now, in: zone)
         let dup = game("same", at: "2026-09-20T17:00Z", state: .live)
         let p = FakeProvider()
-        p.byDay[today] = [dup, dup]
         let store = makeStore(p, now: now)
+        p.byDay[store.today] = [dup, dup]
         await store.refresh()
-        XCTAssertEqual(store.games.count, 1)
+        XCTAssertEqual(store.games(on: store.today).count, 1)
     }
 
     func testFavoritesOnlyFiltersOtherTeams() async {
         let now = ESPNProvider.date(from: "2026-09-20T18:00Z")!
-        let today = CivilDay(now, in: zone)
         let p = FakeProvider()
-        let keep = game("keep", at: "2026-09-20T17:00Z", state: .live)
-        p.byDay[today] = [keep, game("drop", at: "2026-09-20T17:30Z", state: .live)]
         let store = makeStore(p, now: now)
+        let keep = game("keep", at: "2026-09-20T17:00Z", state: .live)
+        p.byDay[store.today] = [keep, game("drop", at: "2026-09-20T17:30Z", state: .live)]
         await store.refresh()
         store.preferences.favoriteTeamIDs = [keep.home.id]
         store.preferences.favoritesOnly = true
         XCTAssertEqual(store.live.map(\.id), ["keep"])
+        XCTAssertEqual(store.games(on: store.today).count, 1,
+                       "a favourites change must filter in place, not clear the cache")
     }
 
     func testNoLeaguesEnabledIsNotAnError() async {
         let now = Date()
-        let p = FakeProvider()
-        let store = ScoreStore(provider: p, preferences: Preferences(enabledLeagueIDs: []), now: { now })
+        let store = ScoreStore(provider: FakeProvider(),
+                               preferences: Preferences(enabledLeagueIDs: []),
+                               zone: zone, now: { now })
         await store.refresh()
-        XCTAssertTrue(store.games.isEmpty)
+        XCTAssertTrue(store.sections.isEmpty)
         XCTAssertFalse(store.freshness.isFailing)
+    }
+
+    func testCollapseIsPerLeagueAndPersistsInPreferences() {
+        var prefs = Preferences(enabledLeagueIDs: ["eng.1", "esp.1"])
+        let eng = League.named("eng.1")!, esp = League.named("esp.1")!
+        XCTAssertFalse(prefs.isCollapsed(eng))
+        prefs.toggleCollapsed(eng)
+        XCTAssertTrue(prefs.isCollapsed(eng))
+        XCTAssertFalse(prefs.isCollapsed(esp), "collapsing one league must not affect another")
+        prefs.toggleCollapsed(eng)
+        XCTAssertFalse(prefs.isCollapsed(eng))
+    }
+
+    func testPreferencesDecodeWithoutCollapsedKey() throws {
+        // Older saved prefs predate collapsedLeagueIDs and must still load.
+        let json = #"{"enabledLeagueIDs":["eng.1"],"favoriteTeamIDs":[],"favoritesOnly":false}"#
+        let p = try JSONDecoder().decode(Preferences.self, from: Data(json.utf8))
+        XCTAssertEqual(p.enabledLeagueIDs, ["eng.1"])
+        XCTAssertTrue(p.collapsedLeagueIDs.isEmpty)
+    }
+}
+
+final class RowPresentationTests: XCTestCase {
+    func testLiveBadgeStripsTheApostrophe() {
+        let g = game("l", at: "2026-09-20T13:00Z", state: .live, h: 0, a: 1, detail: "68'")
+        XCTAssertEqual(g.badgeText, "68")
+    }
+
+    func testHalfTimeBadgeIsKeptAsIs() {
+        let g = game("l", at: "2026-09-20T13:00Z", state: .live, h: 0, a: 0, detail: "HT")
+        XCTAssertEqual(g.badgeText, "HT")
+    }
+
+    func testFinishedGameShowsFT() {
+        let g = game("f", at: "2026-09-20T13:00Z", state: .final, h: 0, a: 1, detail: "FT")
+        XCTAssertEqual(g.badgeText, "FT")
+        XCTAssertEqual(g.scoreLine, "0 - 1")
+    }
+
+    func testScheduledGameHasNoBadgeAndNoScore() {
+        let g = game("s", at: "2026-09-20T13:00Z", state: .scheduled)
+        XCTAssertNil(g.badgeText, "a fixture that has not kicked off shows no pill")
+        XCTAssertNil(g.scoreLine, "and shows its start time instead of 0 - 0")
+    }
+
+    func testScheduledGameWithStrayScoresStillShowsNoScore() {
+        // ESPN sends 0/0 for some unplayed fixtures; that must not render as 0 - 0.
+        let g = game("s", at: "2026-09-20T13:00Z", state: .scheduled, h: 0, a: 0)
+        XCTAssertNil(g.scoreLine)
+    }
+
+    func testPostponedBadge() {
+        let g = game("p", at: "2026-09-20T13:00Z", state: .postponed, detail: "Postponed")
+        XCTAssertEqual(g.badgeText, "PPD")
+    }
+}
+
+final class LeagueDisplayTests: XCTestCase {
+    func testSoccerLeaguesShowCountryPrefix() {
+        XCTAssertEqual(League.named("eng.1")?.displayName, "England - Premier League")
+        XCTAssertEqual(League.named("esp.1")?.displayName, "Spain - LaLiga")
+        XCTAssertEqual(League.named("fra.1")?.displayName, "France - Ligue 1")
+    }
+
+    func testUSLeaguesHaveNoCountryPrefix() {
+        XCTAssertEqual(League.named("nfl")?.displayName, "NFL")
+    }
+
+    func testEveryLeagueHasABadge() {
+        for l in League.defaults {
+            XCTAssertNotNil(l.badge, "\(l.id) is missing its badge URL")
+        }
     }
 }
 

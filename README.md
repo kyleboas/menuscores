@@ -33,12 +33,19 @@ to Login Items. Updates are manual by design: rebuild and replace.
 
 - **Menu bar** — one pinned line: the live score while a game is on, otherwise
   the next matchup and its start time in your zone.
-- **Dropdown** — Live, Today, and Next 7 Days.
+- **Dropdown** — a day strip (Yesterday / Today / Tomorrow, two days back and
+  seven forward), with the selected day's games grouped into collapsible
+  league cards: badge, "England - Premier League", then a row per game as
+  `[FT] Bournemouth (crest) 0 - 1 (crest) Liverpool`. A live game shows a green
+  pill with the minute; a fixture that has not kicked off shows no pill and its
+  start time instead of a score.
 - **Favorites** — pick leagues; optionally hide everything but favorite teams.
 - **Freshness** — "Updated 20 seconds ago" is always on screen, and a failed
   refresh shows an orange warning naming the cache age.
 - **Refresh** — 30s while a game is live, 2min within an hour of kickoff,
   15min otherwise, with exponential backoff capped at 10min while failing.
+  Days are cached individually: the fast live tick refetches only today, since
+  that is the only day whose scores can change.
 
 Deliberately absent: notch handling, news, video, betting odds, cloud sync,
 auto-update.
@@ -99,3 +106,7 @@ To add a provider, implement `ScoreProvider` and pass it to `ScoreStore`.
   is for.
 - Favorites can be toggled off in Settings, but the click-to-favorite
   interaction in the game list is not implemented yet.
+- No red-card markers. The scoreboard endpoint's per-team statistics do not
+  include cards, so showing them would mean a second request per game.
+- League badges are baked-in CDN URLs (the internal ids are not derivable from
+  the slug). Crests come from the feed. Both are cached in memory only.

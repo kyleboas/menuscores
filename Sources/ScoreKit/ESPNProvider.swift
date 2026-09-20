@@ -142,11 +142,15 @@ public struct ESPNProvider: ScoreProvider {
     private func team(from c: [String: Any]) -> Team? {
         guard let t = c["team"] as? [String: Any] else { return nil }
         let id = (t["id"] as? String) ?? ""
-        let name = (t["displayName"] as? String) ?? (t["name"] as? String) ?? "—"
+        // shortDisplayName is the row-sized form ("Bournemouth"); fall back up
+        // the chain when a sport does not provide it.
+        let name = (t["shortDisplayName"] as? String)
+            ?? (t["displayName"] as? String)
+            ?? (t["name"] as? String) ?? "—"
         let abbr = (t["abbreviation"] as? String)
-            ?? (t["shortDisplayName"] as? String)
             ?? String(name.prefix(3)).uppercased()
-        return Team(id: id, name: name, abbreviation: abbr)
+        let crest = (t["logo"] as? String).flatMap(URL.init(string:))
+        return Team(id: id, name: name, abbreviation: abbr, crest: crest)
     }
 
     private static func score(_ c: [String: Any]) -> Int? {

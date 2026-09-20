@@ -105,9 +105,10 @@ check("store completed a refresh", store.freshness.lastSuccess != nil,
 check("no failure warning", store.freshness.warning() == nil,
       store.freshness.warning() ?? "healthy")
 print("  menu bar would read: \"\(MenuBarTitle.text(for: store.pinned, zone: zone))\"")
-print("  live: \(store.live.count)  today: \(store.today.count)  next \(horizon)d: \(store.upcoming.reduce(0) { $0 + $1.games.count })")
-for entry in store.upcoming.prefix(3) {
-    print("    \(entry.day): \(entry.games.count) game(s) — e.g. \(entry.games[0].compactLine)")
+print("  live: \(store.live.count)  on \(store.selectedDay): \(store.games(on: store.selectedDay).count)")
+for section in store.sections.prefix(4) {
+    let g = section.games[0]
+    print("    \(section.league.displayName): \(section.games.count) — \(g.badgeText.map { "[\($0)] " } ?? "")\(g.home.name) \(g.scoreLine ?? MenuBarTitle.clock(g.start, zone: zone)) \(g.away.name)")
 }
 print("")
 

@@ -6,25 +6,30 @@ struct SettingsView: View {
     @Binding var isPresented: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 10) {
             Text("Leagues").font(.headline)
-            ForEach(League.defaults) { league in
-                Toggle(league.name, isOn: binding(for: league))
-                    .toggleStyle(.checkbox)
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(League.defaults) { league in
+                        Toggle(isOn: binding(for: league)) {
+                            HStack(spacing: 7) {
+                                Crest(url: league.badge, size: 15)
+                                Text(league.displayName).font(.system(size: 12))
+                            }
+                        }
+                        .toggleStyle(.checkbox)
+                    }
+                }
             }
+            .frame(height: 210)
 
             Divider()
 
             Toggle("Show only my favorite teams", isOn: $store.preferences.favoritesOnly)
                 .toggleStyle(.checkbox)
-
-            if store.preferences.favoritesOnly {
-                Text(favoritesSummary)
-                    .font(.system(size: 10)).foregroundStyle(.secondary)
-            }
-
-            Text("Click a team in the list to favorite it.")
-                .font(.system(size: 10)).foregroundStyle(.tertiary)
+            Text(favoritesSummary)
+                .font(.system(size: 10)).foregroundStyle(.secondary)
 
             HStack {
                 Spacer()
@@ -32,13 +37,17 @@ struct SettingsView: View {
             }
         }
         .padding(16)
-        .frame(width: 280)
+        .frame(width: 300)
     }
 
     private var favoritesSummary: String {
         let n = store.preferences.favoriteTeamIDs.count
-        return n == 0 ? "No favorites yet — everything is hidden."
-                      : "\(n) team\(n == 1 ? "" : "s") favorited."
+        if n == 0 {
+            return store.preferences.favoritesOnly
+                ? "No favorites picked yet, so nothing will show."
+                : "No favorites picked yet."
+        }
+        return "\(n) team\(n == 1 ? "" : "s") favorited."
     }
 
     private func binding(for league: League) -> Binding<Bool> {
