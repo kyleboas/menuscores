@@ -2,34 +2,25 @@ import SwiftUI
 import Combine
 import ScoreKit
 
-struct DropdownView: View {
+public struct DropdownView: View {
     @Bindable var store: ScoreStore
+    public init(store: ScoreStore) { self.store = store }
     @State private var showingSettings = false
     /// Drives the "updated N seconds ago" line without re-fetching anything.
     @State private var tick = Date()
 
     private let ticker = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
-    var body: some View {
+    public var body: some View {
         VStack(spacing: 0) {
             statusBar
             DayStrip(store: store)
             Divider().opacity(0.5)
 
             ScrollView {
-                LazyVStack(spacing: 10) {
-                    if store.sections.isEmpty {
-                        emptyState
-                    } else {
-                        ForEach(store.sections, id: \.league.id) { section in
-                            LeagueCard(store: store,
-                                       league: section.league,
-                                       games: section.games)
-                        }
-                    }
-                }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 10)
+                SectionList(store: store)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 10)
             }
             .frame(maxHeight: 460)
 
@@ -104,24 +95,7 @@ struct DayStrip: View {
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 18) {
-                    ForEach(store.dayStrip, id: \.self) { day in
-                        let selected = day == store.selectedDay
-                        Button {
-                            store.selectedDay = day
-                        } label: {
-                            Text(store.label(for: day))
-                                .font(.system(size: 13,
-                                              weight: selected ? .bold : .medium))
-                                .foregroundStyle(selected ? Color.primary : Color.secondary)
-                                .fixedSize()
-                        }
-                        .buttonStyle(.plain)
-                        .id(day)
-                    }
-                }
-                .padding(.horizontal, 14)
-                .padding(.bottom, 8)
+                DayTabs(store: store)
             }
             .onAppear { proxy.scrollTo(store.selectedDay, anchor: .center) }
             .onChange(of: store.selectedDay) { _, new in
@@ -187,32 +161,41 @@ struct GameRow: View {
     let zone: TimeZone
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 5) {
             StatusBadge(game: game)
-                .frame(width: 30, alignment: .leading)
+                .frame(width: 24, alignment: .leading)
 
-            Text(game.home.name)
-                .font(.system(size: 12))
-                .foregroundStyle(.primary)
-                .lineLimit(2)
-                .multilineTextAlignment(.trailing)
-                .frame(maxWidth: .infinity, alignment: .trailing)
+            teamName(game.home.name, alignment: .trailing)
 
-            Crest(url: game.home.crest, size: 18)
+            Crest(url: game.home.crest, size: 16)
 
             centre
-                .frame(width: 54)
+                .frame(width: 46)
 
-            Crest(url: game.away.crest, size: 18)
+            Crest(url: game.away.crest, size: 16)
 
-            Text(game.away.name)
-                .font(.system(size: 12))
-                .foregroundStyle(.primary)
-                .lineLimit(2)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            teamName(game.away.name, alignment: .leading)
         }
-        .padding(.horizontal, 12)
+        .padding(.horizontal, 8)
         .padding(.vertical, 9)
+    }
+
+    /// One line, shrinking slightly before it truncates. Wrapping was allowed
+    /// at first, but the name column is only ~80pt wide, so SwiftUI broke long
+    /// names mid-word ("Bournemou / th"). A uniform single line reads better
+    /// and keeps every row the same height.
+    private func teamName(_ name: String, alignment: Alignment) -> some View {
+        Text(name)
+            .font(.system(size: 12))
+            .foregroundStyle(.primary)
+            .lineLimit(1)
+            // Only a safety net for the rare outlier. The columns are sized so
+            // ordinary names ("Bournemouth", "Real Sociedad") fit at full size,
+            // because a low floor here made type size vary row to row.
+            .minimumScaleFactor(0.85)
+            .truncationMode(.tail)
+            .multilineTextAlignment(alignment == .trailing ? .trailing : .leading)
+            .frame(maxWidth: .infinity, alignment: alignment)
     }
 
     @ViewBuilder private var centre: some View {
@@ -263,6 +246,61 @@ struct StatusBadge: View {
         switch game.state {
         case .live, .postponed, .canceled, .unknown: return .black
         default: return .secondary
+        }
+    }
+}
+
+// MARK: - Content, split out of its scroll containers
+
+/// The day buttons themselves. Separate from `DayStrip` so they can be
+/// rendered (and screenshotted) without a ScrollView around them.
+public struct DayTabs: View {
+    @Bindable var store: ScoreStore
+    public init(store: ScoreStore) { self.store = store }
+
+    public var body: some View {
+        HStack(spacing: 18) {
+            ForEach(store.dayStrip, id: \.self) { day in
+                let selected = day == store.selectedDay
+                Button { store.selectedDay = day } label: {
+                    Text(store.label(for: day))
+                        .font(.system(size: 13, weight: selected ? .bold : .medium))
+                        .foregroundStyle(selected ? Color.primary : Color.secondary)
+                        .fixedSize()
+                }
+                .buttonStyle(.plain)
+                .id(day)
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.bottom, 8)
+    }
+}
+
+/// The league cards for the selected day.
+public struct SectionList: View {
+    @Bindable var store: ScoreStore
+    public init(store: ScoreStore) { self.store = store }
+
+    public var body: some View {
+        VStack(spacing: 10) {
+            if store.sections.isEmpty {
+                VStack(spacing: 4) {
+                    Text("No games")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(.secondary)
+                    Text(store.preferences.leagues.isEmpty
+                         ? "No leagues selected — open Settings."
+                         : "Nothing scheduled on \(store.label(for: store.selectedDay).lowercased()).")
+                        .font(.system(size: 10)).foregroundStyle(.tertiary)
+                        .multilineTextAlignment(.center)
+                }
+                .frame(maxWidth: .infinity).padding(.vertical, 28)
+            } else {
+                ForEach(store.sections, id: \.league.id) { section in
+                    LeagueCard(store: store, league: section.league, games: section.games)
+                }
+            }
         }
     }
 }

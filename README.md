@@ -21,6 +21,34 @@ published calendar, and it renders the exact menu bar string end to end.
 Re-run it whenever scores look wrong; it will tell you whether the feed or the
 app is at fault.
 
+## Seeing the interface without running it
+
+    swift run render-preview out.png dark    # or: light
+
+Renders the dropdown offscreen to a PNG with real data from the feed. Useful
+for checking layout without screen-recording permission — it is what caught
+long team names breaking mid-word.
+
+Note that `ImageRenderer` does not lay out `ScrollView` contents, so the
+preview composes `DayTabs` and `SectionList` directly and shows every section
+expanded rather than scrolling.
+
+## Diagnosing a menu bar that looks empty
+
+The app owns its `NSStatusItem` explicitly rather than using SwiftUI's
+`MenuBarExtra`, so it can report what happened. Run the bundle from a terminal:
+
+    ./build/MenuScores.app/Contents/MacOS/MenuScores
+
+    [MenuScores] status item at x=0 y=0 w=99 visible=true screen=1440x932
+
+and to drive it the way a click would, without clicking:
+
+    MENUSCORES_SELFTEST=1 ./build/MenuScores.app/Contents/MacOS/MenuScores
+
+    [MenuScores] title now: " VIL 2-1 LEV 84'"
+    [MenuScores] popover shown after click: true
+
 ## Build and install
 
     ./build-app.sh                 # produces build/MenuScores.app
@@ -81,8 +109,10 @@ touching the interface:
       ScoreStore.swift         # caching, freshness, refresh cadence
       Freshness.swift          # age wording + refresh policy
       MenuBarTitle.swift       # pure string logic, unit tested
-    Sources/MenuScoresApp/     # SwiftUI, imports only ScoreKit types
+    Sources/MenuScoresUI/      # SwiftUI views, imports only ScoreKit types
+    Sources/MenuScoresApp/     # NSStatusItem + NSPopover, app lifecycle
     Sources/scorefeed-probe/   # the data test
+    Sources/render-preview/    # offscreen PNG render of the dropdown
     Tests/ScoreKitTests/
 
 To add a provider, implement `ScoreProvider` and pass it to `ScoreStore`.
