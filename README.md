@@ -1,0 +1,101 @@
+# MenuScores
+
+A minimal macOS menu bar app for live scores and upcoming games.
+Swift 6 + SwiftUI `MenuBarExtra`. Local build, no account, no analytics.
+
+## Status
+
+The data test passed against the live feed on 2026-09-20 for all six default
+leagues, and the app runs. 37 unit tests pass.
+
+## Run the data test first
+
+The feed is the risky part, not the interface — so it has its own check:
+
+    swift run scorefeed-probe            # all default leagues
+    swift run scorefeed-probe nfl eng.1  # specific ones
+
+It verifies, against the live API, that today's scoreboard responds, that each
+of the next 7 days is retrievable, that day queries agree with the provider's
+published calendar, and it renders the exact menu bar string end to end.
+Re-run it whenever scores look wrong; it will tell you whether the feed or the
+app is at fault.
+
+## Build and install
+
+    ./build-app.sh                 # produces build/MenuScores.app
+    open build/MenuScores.app
+
+To keep it running, drag `build/MenuScores.app` to `/Applications` and add it
+to Login Items. Updates are manual by design: rebuild and replace.
+
+## What it does
+
+- **Menu bar** — one pinned line: the live score while a game is on, otherwise
+  the next matchup and its start time in your zone.
+- **Dropdown** — Live, Today, and Next 7 Days.
+- **Favorites** — pick leagues; optionally hide everything but favorite teams.
+- **Freshness** — "Updated 20 seconds ago" is always on screen, and a failed
+  refresh shows an orange warning naming the cache age.
+- **Refresh** — 30s while a game is live, 2min within an hour of kickoff,
+  15min otherwise, with exponential backoff capped at 10min while failing.
+
+Deliberately absent: notch handling, news, video, betting odds, cloud sync,
+auto-update.
+
+## What the feed actually supports
+
+Probed 2026-09-20 against `site.api.espn.com`:
+
+| Query | Result |
+|---|---|
+| `?dates=yyyyMMdd` | 200 — works for past and future days |
+| `?dates=yyyyMM` | 200 — whole month |
+| `?dates=yyyyMMdd-yyyyMMdd` | **400 — the range syntax is gone** |
+
+The removed range syntax is what cost the original app its multi-day schedule.
+This app never emits it: the 7-day view is built from single-day queries.
+
+`leagues[0].calendar` lists real fixture days and is used to skip empty ones —
+but only as an optimization. MLB publishes just 20 calendar entries, so it is
+not a complete index, and today is never skipped on its say-so.
+
+## Structure
+
+Provider-specific code is isolated so a failing feed can be swapped without
+touching the interface:
+
+    Sources/ScoreKit/          # models, provider protocol, store — no UI
+      ScoreProvider.swift      # the protocol + CivilDay
+      ESPNProvider.swift       # the only file that knows about ESPN
+      ScoreStore.swift         # caching, freshness, refresh cadence
+      Freshness.swift          # age wording + refresh policy
+      MenuBarTitle.swift       # pure string logic, unit tested
+    Sources/MenuScoresApp/     # SwiftUI, imports only ScoreKit types
+    Sources/scorefeed-probe/   # the data test
+    Tests/ScoreKitTests/
+
+To add a provider, implement `ScoreProvider` and pass it to `ScoreStore`.
+
+## Tested edge cases
+
+`swift test` — 37 tests covering the failure modes that break score apps:
+
+- Postponed/suspended/canceled games reported by ESPN as `state: "post"`,
+  which a naive reader shows as a 0–0 final.
+- Time zones: a 03:30Z kickoff is the 20th in New York, the 21st in London.
+- Midnight rollover and DST: day arithmetic goes through `CivilDay`, so
+  adding a day across 2026-11-01 lands on the 1st, not 23 hours later.
+- Lost connection: cached games survive, but the failure is always surfaced
+  with the cache age — the specific bug found in the original app.
+- Recovery clearing the warning, de-duplication, favorites filtering,
+  and a calendar that omits today never suppressing a live game.
+
+## Known limits
+
+- Unsigned local build. macOS may warn on first launch; ad-hoc signed so the
+  network permission sticks.
+- ESPN's endpoint is undocumented and can change again. That is what the probe
+  is for.
+- Favorites can be toggled off in Settings, but the click-to-favorite
+  interaction in the game list is not implemented yet.
