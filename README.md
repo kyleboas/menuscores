@@ -66,9 +66,12 @@ to Login Items. Updates are manual by design: rebuild and replace.
 - **Dropdown** — a day strip (Yesterday / Today / Tomorrow, two days back and
   seven forward) over the selected day's games, grouped into collapsible
   league cards: badge, "England - Premier League", then a row per game as
-  `[FT] Bournemouth (crest) 0 - 1 (crest) Liverpool`. A live game shows a green
-  pill with the minute; a fixture that has not kicked off shows no pill and its
-  start time instead of a score.
+  `[FT] Bournemouth (crest) 0 - 1 (crest) Liverpool`. A fixture that has not
+  kicked off shows no pill and its start time instead of a score.
+- **Live status pill** — compacted per sport, because the pill holds about four
+  characters and the feed's wording varies: soccer `69'` and `45'+1'` become
+  `69` and `45+1`; baseball `Top 4th` / `Bot 1st` become `▲4` / `▼1`; football
+  and hockey `1:07 - 2nd` become `Q2` / `P2`; a rain delay becomes `DLY`.
 - **Favorites** — pick leagues; optionally hide everything but favorite teams.
 - **Freshness** — "Updated 20 seconds ago" is always on screen, and a failed
   refresh shows an orange warning naming the cache age.

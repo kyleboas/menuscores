@@ -455,9 +455,108 @@ final class RowPresentationTests: XCTestCase {
         XCTAssertNil(g.scoreLine)
     }
 
+    func testPostponedGameShowsNoScoreEvenWhenTheFeedSendsZeros() {
+        // MLB sends 0/0 for postponed games; rendering that looks like a
+        // genuine 0 - 0 result.
+        let g = game("p", at: "2026-09-20T13:00Z", state: .postponed, h: 0, a: 0,
+                     detail: "Postponed")
+        XCTAssertNil(g.scoreLine)
+        XCTAssertFalse(g.hasScore)
+    }
+
+    func testCanceledGameShowsNoScore() {
+        let g = game("c", at: "2026-09-20T13:00Z", state: .canceled, h: 0, a: 0)
+        XCTAssertNil(g.scoreLine)
+    }
+
+    func testPlayedGamesStillShowScores() {
+        XCTAssertEqual(game("f", at: "2026-09-20T13:00Z", state: .final, h: 2, a: 1).scoreLine,
+                       "2 - 1")
+        XCTAssertEqual(game("l", at: "2026-09-20T13:00Z", state: .live, h: 0, a: 0).scoreLine,
+                       "0 - 0", "a genuine goalless game in progress still shows 0 - 0")
+    }
+
     func testPostponedBadge() {
         let g = game("p", at: "2026-09-20T13:00Z", state: .postponed, detail: "Postponed")
         XCTAssertEqual(g.badgeText, "PPD")
+    }
+}
+
+final class StatusBadgeTextTests: XCTestCase {
+    private func c(_ s: String, _ sport: String) -> String {
+        StatusBadgeText.compact(s, sport: sport)
+    }
+
+    // Baseball — the case that prompted this: "Bot 1st" rendered as "Bot…".
+    func testBaseballInnings() {
+        XCTAssertEqual(c("Top 4th", "baseball"), "▲4")
+        XCTAssertEqual(c("Bot 1st", "baseball"), "▼1")
+        XCTAssertEqual(c("Bottom 9th", "baseball"), "▼9")
+        XCTAssertEqual(c("End 4th", "baseball"), "E4")
+        XCTAssertEqual(c("Mid 3rd", "baseball"), "M3")
+        XCTAssertEqual(c("Top 10th", "baseball"), "▲10")
+    }
+
+    func testBaseballDelayIsNotMistakenForAnInning() {
+        XCTAssertEqual(c("Rain Delay, Top 1st", "baseball"), "DLY")
+    }
+
+    // Clock-and-period sports: the period matters, the clock cannot fit.
+    func testFootballAndHockeyPeriods() {
+        XCTAssertEqual(c("1:07 - 2nd", "football"), "Q2",
+                       "the period comes from the ordinal, not the clock")
+        XCTAssertEqual(c("0:24 - 4th", "football"), "Q4")
+        XCTAssertEqual(c("5:28 - 2nd", "hockey"), "P2")
+        XCTAssertEqual(c("Halftime", "football"), "HT")
+    }
+
+    func testOvertime() {
+        XCTAssertEqual(c("2:00 - OT", "hockey"), "OT")
+    }
+
+    func testSoccerUnchanged() {
+        XCTAssertEqual(c("69'", "soccer"), "69")
+        XCTAssertEqual(c("45'+1'", "soccer"), "45+1")
+        XCTAssertEqual(c("HT", "soccer"), "HT")
+    }
+
+    func testEveryBadgeFitsThePill() {
+        // The pill holds about four characters; anything longer truncates.
+        let samples: [(String, String)] = [
+            ("Top 4th", "baseball"), ("Bot 1st", "baseball"), ("End 4th", "baseball"),
+            ("Rain Delay, Top 1st", "baseball"), ("Bottom 12th", "baseball"),
+            ("1:07 - 2nd", "football"), ("Halftime", "football"),
+            ("5:28 - 2nd", "hockey"), ("2:00 - OT", "hockey"),
+            ("69'", "soccer"), ("45'+1'", "soccer"), ("90'+5'", "soccer"),
+        ]
+        for (text, sport) in samples {
+            let out = c(text, sport)
+            XCTAssertLessThanOrEqual(out.count, 4,
+                "\(sport) \"\(text)\" -> \"\(out)\" is too long for the pill")
+            XCTAssertFalse(out.isEmpty)
+        }
+    }
+
+    func testFinalDiffersBySport() {
+        let mlb = League.named("mlb")!
+        let epl = League.named("eng.1")!
+        func g(_ l: League) -> Game {
+            Game(id: "x", league: l, start: Date(), state: .final,
+                 home: Team(id: "h", name: "H", abbreviation: "H"),
+                 away: Team(id: "a", name: "A", abbreviation: "A"),
+                 homeScore: 1, awayScore: 0, statusDetail: "Final")
+        }
+        XCTAssertEqual(g(epl).badgeText, "FT")
+        XCTAssertEqual(g(mlb).badgeText, "FIN")
+    }
+
+    func testBaseballBadgeReachesTheGameLayer() {
+        let mlb = League.named("mlb")!
+        let game = Game(id: "x", league: mlb, start: Date(), state: .live,
+                        home: Team(id: "h", name: "H", abbreviation: "H"),
+                        away: Team(id: "a", name: "A", abbreviation: "A"),
+                        homeScore: 2, awayScore: 1, statusDetail: "Bot 7th")
+        XCTAssertEqual(game.badgeText, "▼7")
     }
 }
 
@@ -547,8 +646,10 @@ final class MenuBarTitleTests: XCTestCase {
     }
 
     func testPostponedGameIsMarkedNotScored() {
+        // The feed sends 0/0 for postponed games; the menu bar must show the
+        // matchup, not a fabricated 0–0.
         let g = game("p", at: "2026-09-20T13:00Z", state: .postponed, h: 0, a: 0)
-        XCTAssertEqual(MenuBarTitle.text(for: g, zone: utc), "HOM 0–0 AWY PPD")
+        XCTAssertEqual(MenuBarTitle.text(for: g, zone: utc), "HOM v AWY PPD")
     }
 
     func testLiveGameWithoutDetailDoesNotGainTrailingSpace() {

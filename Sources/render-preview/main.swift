@@ -19,7 +19,15 @@ func run() async -> Int32 {
     let app = NSApplication.shared
     app.setActivationPolicy(.accessory)
 
-    let store = ScoreStore()
+    // MENUSCORES_LEAGUES=mlb,nfl overrides the saved league selection, so the
+    // preview can exercise sports the user does not currently follow.
+    let store: ScoreStore
+    if let override = ProcessInfo.processInfo.environment["MENUSCORES_LEAGUES"] {
+        let ids = Set(override.split(separator: ",").map(String.init))
+        store = ScoreStore(preferences: Preferences(enabledLeagueIDs: ids))
+    } else {
+        store = ScoreStore()
+    }
     print("Fetching \(store.preferences.leagues.count) league(s) for \(store.selectedDay)…")
     await store.refresh()
 

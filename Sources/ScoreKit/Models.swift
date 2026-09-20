@@ -110,9 +110,17 @@ public struct Game: Identifiable, Hashable, Sendable, Codable {
     public var isLive: Bool { state == .live }
     public var involves: Set<String> { [home.id, away.id] }
 
-    /// Whether a score should be rendered at all, or the kickoff time instead.
+    /// Whether a score should be rendered at all.
+    ///
+    /// A postponed or cancelled game still carries 0/0 from the feed, and
+    /// showing that renders as a real "0 - 0" result. Only games that were
+    /// actually played have a score.
     public var hasScore: Bool {
-        homeScore != nil && awayScore != nil && state != .scheduled
+        guard homeScore != nil, awayScore != nil else { return false }
+        switch state {
+        case .live, .final:                        return true
+        case .scheduled, .postponed, .canceled, .unknown: return false
+        }
     }
 
     /// Centre column: "0 - 1" once there is a score, otherwise nothing
@@ -125,15 +133,8 @@ public struct Game: Identifiable, Hashable, Sendable, Codable {
     /// Left-hand pill. nil for a scheduled game, which shows no badge.
     public var badgeText: String? {
         switch state {
-        case .live:
-            // "69'" -> "69", and stoppage time "45'+1'" -> "45+1". Stripping
-            // only the trailing mark left an apostrophe stranded mid-badge.
-            let d = statusDetail
-                .trimmingCharacters(in: .whitespaces)
-                .replacingOccurrences(of: "'", with: "")
-                .replacingOccurrences(of: " ", with: "")
-            return d.isEmpty ? "LIVE" : d
-        case .final:     return statusDetail.isEmpty ? "FT" : statusDetail
+        case .live:      return StatusBadgeText.compact(statusDetail, sport: league.sport)
+        case .final:     return league.sport == "soccer" ? "FT" : "FIN"
         case .postponed: return "PPD"
         case .canceled:  return "CANC"
         case .unknown:   return "?"
@@ -146,5 +147,69 @@ public struct Game: Identifiable, Hashable, Sendable, Codable {
             return "\(home.abbreviation) \(s.replacingOccurrences(of: " - ", with: "–")) \(away.abbreviation)"
         }
         return "\(home.abbreviation) v \(away.abbreviation)"
+    }
+}
+
+
+/// Squeezes a provider's live-status text into the few characters the pill can
+/// show. The feed's wording differs per sport — "69'", "Top 4th", "1:07 - 2nd",
+/// "Halftime" — and simply stripping spaces produced "Bot1st" and "1:07-2nd",
+/// which overflowed the pill and truncated to "Bot…".
+public enum StatusBadgeText {
+    public static func compact(_ detail: String, sport: String) -> String {
+        let d = detail.trimmingCharacters(in: .whitespaces)
+        guard !d.isEmpty else { return "LIVE" }
+        let lower = d.lowercased()
+
+        // A delay can be prefixed onto any status, e.g. "Rain Delay, Top 1st".
+        if lower.contains("delay") { return "DLY" }
+        if lower.hasPrefix("half") { return "HT" }
+        if lower.contains("shootout") { return "SO" }
+        if lower == "end" { return "END" }
+
+        switch sport {
+        case "soccer":
+            // "69'" -> "69"; stoppage "45'+1'" -> "45+1"; "HT" stays.
+            let stripped = d.replacingOccurrences(of: "'", with: "")
+                            .replacingOccurrences(of: " ", with: "")
+            return String(stripped.prefix(5))
+
+        case "baseball":
+            // "Top 4th" -> "▲4", "Bot 1st" -> "▼1", "End 4th" -> "E4".
+            if let inning = firstNumber(in: d) {
+                if lower.hasPrefix("top") { return "▲\(inning)" }
+                if lower.hasPrefix("bot") { return "▼\(inning)" }
+                if lower.hasPrefix("mid") { return "M\(inning)" }
+                if lower.hasPrefix("end") { return "E\(inning)" }
+                return "\(inning)"
+            }
+            return String(d.prefix(3))
+
+        default:
+            // Clock-and-period sports: "1:07 - 2nd" -> "Q2" (football,
+            // basketball) or "P2" (hockey). The clock does not fit; the period
+            // is the part worth keeping.
+            if lower.contains("ot") && !lower.contains("bot") { return "OT" }
+            let mark = (sport == "hockey") ? "P" : "Q"
+            // Take the period from the ordinal, not from the clock.
+            if let period = ordinalNumber(in: d) { return "\(mark)\(period)" }
+            if let n = firstNumber(in: d) { return "\(mark)\(n)" }
+            return String(d.prefix(3))
+        }
+    }
+
+    /// The number attached to an ordinal suffix, so "1:07 - 2nd" yields 2
+    /// rather than 1.
+    static func ordinalNumber(in s: String) -> Int? {
+        let pattern = #"(\d{1,2})\s*(st|nd|rd|th)"#
+        guard let re = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]),
+              let m = re.firstMatch(in: s, range: NSRange(s.startIndex..., in: s)),
+              let r = Range(m.range(at: 1), in: s) else { return nil }
+        return Int(s[r])
+    }
+
+    static func firstNumber(in s: String) -> Int? {
+        let digits = s.drop { !$0.isNumber }.prefix { $0.isNumber }
+        return Int(digits)
     }
 }

@@ -94,11 +94,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 diag("item width: \(Int(w))pt, tooltip: \"\(self.statusItem?.button?.toolTip ?? "nil")\"")
                 diag("sections: \(self.store.sections.count), "
                      + "games: \(self.store.sections.reduce(0) { $0 + $1.games.count })")
+                // A real click activates the app first; a synthetic toggle on a
+                // terminal-launched process does not. Activate here so the test
+                // measures the popover, not the activation state.
+                // Note: do NOT call NSApp.activate before this. Doing so makes
+                // the transient popover fail to appear; without it, show()
+                // succeeds reliably.
                 self.togglePopover(nil)
                 diag("popover shown after click: \(self.popover?.isShown ?? false)")
-                if let size = self.popover?.contentViewController?.view.fittingSize {
-                    diag("popover content size: \(Int(size.width))x\(Int(size.height))")
-                }
+                diag("popover window visible: "
+                     + "\(self.popover?.contentViewController?.view.window?.isVisible ?? false)")
                 NSApp.terminate(nil)
             }
         }
