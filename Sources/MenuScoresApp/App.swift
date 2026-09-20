@@ -71,7 +71,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didWakeNotification, object: nil, queue: .main
         ) { [store] _ in
-            MainActor.assumeIsolated { store.start() }
+            MainActor.assumeIsolated {
+                // Waking on a later date must not leave a stale day selected.
+                store.selectedDay = CivilDay.today(in: store.zone)
+                store.start()
+            }
         }
     }
 

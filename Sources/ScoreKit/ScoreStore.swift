@@ -12,6 +12,14 @@ public final class ScoreStore {
     public private(set) var freshness = Freshness()
     public private(set) var isRefreshing = false
 
+    /// Which day the dropdown is showing.
+    public var selectedDay: CivilDay {
+        didSet {
+            guard selectedDay != oldValue else { return }
+            Task { await self.load(days: [selectedDay]) }
+        }
+    }
+
     public var preferences: Preferences {
         didSet {
             guard preferences != oldValue else { return }
@@ -26,6 +34,9 @@ public final class ScoreStore {
         }
     }
 
+    /// How far the day strip reaches either side of today.
+    public let pastDays = 2
+    public let futureDays = 7
     public var zone: TimeZone = .current
 
     private let provider: ScoreProvider
@@ -41,9 +52,29 @@ public final class ScoreStore {
         self.preferences = preferences
         self.zone = zone
         self.now = now
+        self.selectedDay = CivilDay.today(in: zone, now: now())
     }
 
+    // MARK: - Day strip
+
     public var today: CivilDay { CivilDay.today(in: zone, now: now()) }
+
+    public var dayStrip: [CivilDay] {
+        let t = today
+        return (-pastDays...futureDays).map { t.adding(days: $0, in: zone) }
+    }
+
+    /// "Yesterday" / "Today" / "Tomorrow", else a weekday + date.
+    public func label(for day: CivilDay) -> String {
+        let t = today
+        if day == t { return "Today" }
+        if day == t.adding(days: -1, in: zone) { return "Yesterday" }
+        if day == t.adding(days: 1, in: zone) { return "Tomorrow" }
+        let f = DateFormatter()
+        f.timeZone = zone
+        f.dateFormat = "EEE d MMM"
+        return f.string(from: day.startOfDay(in: zone))
+    }
 
     // MARK: - Derived views
 
@@ -51,10 +82,10 @@ public final class ScoreStore {
         (gamesByDay[day] ?? []).filter { preferences.matches($0) }
     }
 
-    /// Today's games grouped into league sections, ordered by the league list
-    /// so the sections do not reshuffle between refreshes.
+    /// The selected day's games grouped into league sections, ordered by the
+    /// league list so the sections do not reshuffle between refreshes.
     public var sections: [(league: League, games: [Game])] {
-        let games = games(on: today)
+        let games = games(on: selectedDay)
         let order = preferences.leagues.map(\.id)
         return Dictionary(grouping: games) { $0.league }
             .map { (league: $0.key, games: $0.value.sorted(by: Self.rowOrder)) }
@@ -153,11 +184,12 @@ public final class ScoreStore {
 
     public func stop() { timer?.cancel(); timer = nil }
 
-    /// Today, plus tomorrow so the menu bar can name the next fixture once
-    /// today's games are done.
+    /// What is on screen, plus the days the menu bar line is drawn from.
     private var workingSet: [CivilDay] {
         let t = today
-        return [t, t.adding(days: 1, in: zone)]
+        let days = [t, selectedDay, t.adding(days: 1, in: zone)]
+        var seen = Set<CivilDay>()
+        return days.filter { seen.insert($0).inserted }
     }
 
     public func refresh() async {

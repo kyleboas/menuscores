@@ -177,7 +177,61 @@ final class ScoreStoreTests: XCTestCase {
                    now: { now })
     }
 
-    func testSectionsShowToday() async {
+    func testDayStripSpansPastAndFuture() {
+        let now = ESPNProvider.date(from: "2026-09-20T18:00Z")!
+        let store = makeStore(FakeProvider(), now: now)
+        let strip = store.dayStrip
+        XCTAssertEqual(strip.count, store.pastDays + store.futureDays + 1)
+        XCTAssertTrue(strip.contains(store.today))
+        XCTAssertEqual(store.label(for: strip.first!), "Fri 18 Sep")
+    }
+
+    func testRelativeDayLabels() {
+        let now = ESPNProvider.date(from: "2026-09-20T18:00Z")!
+        let store = makeStore(FakeProvider(), now: now)
+        let t = store.today
+        XCTAssertEqual(store.label(for: t), "Today")
+        XCTAssertEqual(store.label(for: t.adding(days: -1, in: zone)), "Yesterday")
+        XCTAssertEqual(store.label(for: t.adding(days: 1, in: zone)), "Tomorrow")
+        XCTAssertEqual(store.label(for: t.adding(days: 2, in: zone)), "Tue 22 Sep")
+    }
+
+    func testSelectedDayDrivesSections() async {
+        let now = ESPNProvider.date(from: "2026-09-20T18:00Z")!
+        let p = FakeProvider()
+        let store = makeStore(p, now: now)
+        let t = store.today
+        let tomorrow = t.adding(days: 1, in: zone)
+        p.byDay[t] = [game("today", at: "2026-09-20T23:00Z", state: .scheduled)]
+        p.byDay[tomorrow] = [game("tmrw", at: "2026-09-21T23:00Z", state: .scheduled)]
+
+        await store.refresh()
+        XCTAssertEqual(store.sections.flatMap { $0.games }.map(\.id), ["today"])
+
+        store.selectedDay = tomorrow
+        await store.load(days: [tomorrow])
+        XCTAssertEqual(store.sections.flatMap { $0.games }.map(\.id), ["tmrw"])
+    }
+
+    func testYesterdayIsSelectableAndFetchable() async {
+        let now = ESPNProvider.date(from: "2026-09-20T18:00Z")!
+        let p = FakeProvider()
+        let store = makeStore(p, now: now)
+        let yesterday = store.today.adding(days: -1, in: zone)
+        p.byDay[yesterday] = [game("y", at: "2026-09-19T23:00Z", state: .final, h: 2, a: 0)]
+
+        store.selectedDay = yesterday
+        await store.load(days: [yesterday])
+        XCTAssertEqual(store.sections.flatMap { $0.games }.map(\.id), ["y"])
+    }
+
+    func testDefaultSelectionIsToday() {
+        let now = ESPNProvider.date(from: "2026-09-20T18:00Z")!
+        let store = makeStore(FakeProvider(), now: now)
+        XCTAssertEqual(store.selectedDay, store.today)
+    }
+
+    func testSectionsShowSelectedDay() async {
         let now = ESPNProvider.date(from: "2026-09-20T18:00Z")!
         let p = FakeProvider()
         let store = makeStore(p, now: now)
@@ -187,12 +241,12 @@ final class ScoreStoreTests: XCTestCase {
 
         await store.refresh()
         XCTAssertEqual(store.sections.flatMap { $0.games }.map(\.id), ["today"],
-                       "the dropdown shows today only")
+                       "the dropdown opens on today")
     }
 
-    func testTomorrowIsFetchedForTheMenuBarButNotListed() async {
-        // Tomorrow is still cached so the menu bar can name the next fixture,
-        // but it must not appear in the dropdown's sections.
+    func testTomorrowIsFetchedButNotListedUntilSelected() async {
+        // Tomorrow is cached so the menu bar can name the next fixture, but it
+        // must not appear under today's sections until the tab is selected.
         let now = ESPNProvider.date(from: "2026-09-20T18:00Z")!
         let p = FakeProvider()
         let store = makeStore(p, now: now)

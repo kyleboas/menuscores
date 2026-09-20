@@ -16,6 +16,7 @@ public struct DropdownView: View {
     public var body: some View {
         VStack(spacing: 0) {
             statusBar
+            DayStrip(store: store)
             Divider().opacity(0.5)
 
             ScrollView {
@@ -68,6 +69,52 @@ public struct DropdownView: View {
                 .buttonStyle(.plain).font(.system(size: 11)).foregroundStyle(.secondary)
         }
         .padding(.horizontal, 14).padding(.vertical, 8)
+    }
+}
+
+// MARK: - Day strip
+
+/// Yesterday / Today / Tomorrow / dates, scrolled so the selection stays visible.
+struct DayStrip: View {
+    @Bindable var store: ScoreStore
+
+    var body: some View {
+        ScrollViewReader { proxy in
+            ScrollView(.horizontal, showsIndicators: false) {
+                DayTabs(store: store)
+            }
+            .onAppear { proxy.scrollTo(store.selectedDay, anchor: .center) }
+            .onChange(of: store.selectedDay) { _, new in
+                withAnimation(.easeOut(duration: 0.18)) {
+                    proxy.scrollTo(new, anchor: .center)
+                }
+            }
+        }
+    }
+}
+
+/// The day buttons themselves. Separate from `DayStrip` so they can be
+/// rendered (and screenshotted) without a ScrollView around them.
+public struct DayTabs: View {
+    @Bindable var store: ScoreStore
+    public init(store: ScoreStore) { self.store = store }
+
+    public var body: some View {
+        HStack(spacing: 18) {
+            ForEach(store.dayStrip, id: \.self) { day in
+                let selected = day == store.selectedDay
+                Button { store.selectedDay = day } label: {
+                    Text(store.label(for: day))
+                        .font(.system(size: 13, weight: selected ? .bold : .medium))
+                        .foregroundStyle(selected ? Color.primary : Color.secondary)
+                        .fixedSize()
+                }
+                .buttonStyle(.plain)
+                .id(day)
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.bottom, 8)
     }
 }
 
@@ -224,7 +271,7 @@ struct StatusBadge: View {
 
 // MARK: - Content, split out of its scroll containers
 
-/// The league cards for today.
+/// The league cards for the selected day.
 public struct SectionList: View {
     @Bindable var store: ScoreStore
     public init(store: ScoreStore) { self.store = store }
@@ -238,7 +285,7 @@ public struct SectionList: View {
                         .foregroundStyle(.secondary)
                     Text(store.preferences.leagues.isEmpty
                          ? "No leagues selected — open Settings."
-                         : "Nothing scheduled today.")
+                         : "Nothing scheduled \(store.label(for: store.selectedDay).lowercased()).")
                         .font(.system(size: 10)).foregroundStyle(.tertiary)
                         .multilineTextAlignment(.center)
                 }

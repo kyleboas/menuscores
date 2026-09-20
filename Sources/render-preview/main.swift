@@ -20,7 +20,7 @@ func run() async -> Int32 {
     app.setActivationPolicy(.accessory)
 
     let store = ScoreStore()
-    print("Fetching \(store.preferences.leagues.count) league(s) for \(store.today)…")
+    print("Fetching \(store.preferences.leagues.count) league(s) for \(store.selectedDay)…")
     await store.refresh()
 
     if let w = store.freshness.warning() {
@@ -48,9 +48,15 @@ func run() async -> Int32 {
     // Composed without the scroll containers: ImageRenderer does not lay out
     // ScrollView content, so rendering DropdownView directly yields a blank
     // middle. This mirrors what the real dropdown shows, fully expanded.
-    let view = SectionList(store: store)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 10)
+    let view = VStack(spacing: 0) {
+        DayTabs(store: store)
+            .padding(.top, 10)
+        Divider().opacity(0.5)
+        SectionList(store: store)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 10)
+    }
+    .frame(width: 340)
     .frame(width: 340)
     .environment(\.colorScheme, dark ? .dark : .light)
     .background(dark ? Color(white: 0.08) : Color(white: 0.97))
