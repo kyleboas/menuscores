@@ -69,10 +69,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didWakeNotification, object: nil, queue: .main
         ) { [store] _ in
-            MainActor.assumeIsolated {
-                store.selectedDay = CivilDay.today(in: store.zone)
-                store.start()
-            }
+            MainActor.assumeIsolated { store.start() }
         }
     }
 

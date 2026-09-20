@@ -172,52 +172,32 @@ final class ScoreStoreTests: XCTestCase {
                    now: { now })
     }
 
-    func testDayStripSpansPastAndFuture() {
-        let now = ESPNProvider.date(from: "2026-09-20T18:00Z")!
-        let store = makeStore(FakeProvider(), now: now)
-        let strip = store.dayStrip
-        XCTAssertEqual(strip.count, store.pastDays + store.futureDays + 1)
-        XCTAssertEqual(store.label(for: store.today), "Today")
-        XCTAssertEqual(store.label(for: strip.first!), "Fri 18 Sep")
-        XCTAssertTrue(strip.contains(store.today))
-    }
-
-    func testRelativeDayLabels() {
-        let now = ESPNProvider.date(from: "2026-09-20T18:00Z")!
-        let store = makeStore(FakeProvider(), now: now)
-        let t = store.today
-        XCTAssertEqual(store.label(for: t.adding(days: -1, in: zone)), "Yesterday")
-        XCTAssertEqual(store.label(for: t.adding(days: 1, in: zone)), "Tomorrow")
-        XCTAssertEqual(store.label(for: t.adding(days: 2, in: zone)), "Tue 22 Sep")
-    }
-
-    func testSelectedDayDrivesSections() async {
+    func testSectionsShowToday() async {
         let now = ESPNProvider.date(from: "2026-09-20T18:00Z")!
         let p = FakeProvider()
         let store = makeStore(p, now: now)
         let t = store.today
-        let tomorrow = t.adding(days: 1, in: zone)
         p.byDay[t] = [game("today", at: "2026-09-20T23:00Z", state: .scheduled)]
-        p.byDay[tomorrow] = [game("tmrw", at: "2026-09-21T23:00Z", state: .scheduled)]
+        p.byDay[t.adding(days: 1, in: zone)] = [game("tmrw", at: "2026-09-21T23:00Z", state: .scheduled)]
 
         await store.refresh()
-        XCTAssertEqual(store.sections.flatMap { $0.games }.map(\.id), ["today"])
-
-        store.selectedDay = tomorrow
-        await store.load(days: [tomorrow])
-        XCTAssertEqual(store.sections.flatMap { $0.games }.map(\.id), ["tmrw"])
+        XCTAssertEqual(store.sections.flatMap { $0.games }.map(\.id), ["today"],
+                       "the dropdown shows today only")
     }
 
-    func testYesterdayIsFetchable() async {
+    func testTomorrowIsFetchedForTheMenuBarButNotListed() async {
+        // Tomorrow is still cached so the menu bar can name the next fixture,
+        // but it must not appear in the dropdown's sections.
         let now = ESPNProvider.date(from: "2026-09-20T18:00Z")!
         let p = FakeProvider()
         let store = makeStore(p, now: now)
-        let yesterday = store.today.adding(days: -1, in: zone)
-        p.byDay[yesterday] = [game("y", at: "2026-09-19T23:00Z", state: .final, h: 2, a: 0)]
+        let tomorrow = store.today.adding(days: 1, in: zone)
+        p.byDay[tomorrow] = [game("tmrw", at: "2026-09-21T15:00Z", state: .scheduled)]
 
-        store.selectedDay = yesterday
-        await store.load(days: [yesterday])
-        XCTAssertEqual(store.games(on: yesterday).map(\.id), ["y"])
+        await store.refresh()
+        XCTAssertTrue(store.sections.isEmpty)
+        XCTAssertEqual(store.games(on: tomorrow).map(\.id), ["tmrw"])
+        XCTAssertEqual(store.pinned?.id, "tmrw")
     }
 
     func testSectionsGroupByLeagueInPreferenceOrder() async {
@@ -379,6 +359,20 @@ final class RowPresentationTests: XCTestCase {
         XCTAssertEqual(g.badgeText, "68")
     }
 
+    func testStoppageTimeBadgeIsCompact() {
+        // The feed sends "45'+1'". Stripping only the trailing mark left
+        // "45'+1", which stranded an apostrophe mid-badge and overflowed it.
+        let g = game("l", at: "2026-09-20T13:00Z", state: .live, h: 2, a: 0, detail: "45'+1'")
+        XCTAssertEqual(g.badgeText, "45+1")
+        XCTAssertLessThanOrEqual(g.badgeText!.count, 4,
+                                 "badge must fit its column at the worst case")
+    }
+
+    func testSecondHalfStoppageBadge() {
+        let g = game("l", at: "2026-09-20T13:00Z", state: .live, h: 2, a: 0, detail: "90'+5'")
+        XCTAssertEqual(g.badgeText, "90+5")
+    }
+
     func testHalfTimeBadgeIsKeptAsIs() {
         let g = game("l", at: "2026-09-20T13:00Z", state: .live, h: 0, a: 0, detail: "HT")
         XCTAssertEqual(g.badgeText, "HT")
@@ -419,10 +413,21 @@ final class LeagueDisplayTests: XCTestCase {
         XCTAssertEqual(League.named("nfl")?.displayName, "NFL")
     }
 
-    func testEveryLeagueHasABadge() {
+    func testEveryLeagueHasBothBadgeVariants() {
         for l in League.defaults {
-            XCTAssertNotNil(l.badge, "\(l.id) is missing its badge URL")
+            XCTAssertNotNil(l.badge(dark: true), "\(l.id) is missing its dark badge")
+            XCTAssertNotNil(l.badge(dark: false), "\(l.id) is missing its light badge")
         }
+    }
+
+    func testBadgeVariantsDiffer() {
+        // The dark asset is a white knockout; reusing it on a light background
+        // made the Premier League badge invisible.
+        for l in League.defaults {
+            XCTAssertNotEqual(l.badge(dark: true), l.badge(dark: false), "\(l.id)")
+        }
+        XCTAssertEqual(League.named("eng.1")?.badge(dark: false)?.absoluteString,
+                       "https://a.espncdn.com/i/leaguelogos/soccer/500/23.png")
     }
 }
 

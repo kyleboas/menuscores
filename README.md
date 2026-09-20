@@ -30,8 +30,8 @@ for checking layout without screen-recording permission — it is what caught
 long team names breaking mid-word.
 
 Note that `ImageRenderer` does not lay out `ScrollView` contents, so the
-preview composes `DayTabs` and `SectionList` directly and shows every section
-expanded rather than scrolling.
+preview composes `SectionList` directly and shows every section expanded
+rather than scrolling.
 
 ## Diagnosing a menu bar that looks empty
 
@@ -63,9 +63,8 @@ to Login Items. Updates are manual by design: rebuild and replace.
   the next matchup and its start time in your zone. Reads "Scores…" until the
   first fetch lands and "No games" when nothing is on, never a bare glyph, and
   is capped at 22 characters so it survives a notched display.
-- **Dropdown** — a day strip (Yesterday / Today / Tomorrow, two days back and
-  seven forward), with the selected day's games grouped into collapsible
-  league cards: badge, "England - Premier League", then a row per game as
+- **Dropdown** — today's games, grouped into collapsible league cards:
+  badge, "England - Premier League", then a row per game as
   `[FT] Bournemouth (crest) 0 - 1 (crest) Liverpool`. A live game shows a green
   pill with the minute; a fixture that has not kicked off shows no pill and its
   start time instead of a score.
@@ -142,4 +141,8 @@ To add a provider, implement `ScoreProvider` and pass it to `ScoreStore`.
 - No red-card markers. The scoreboard endpoint's per-team statistics do not
   include cards, so showing them would mean a second request per game.
 - League badges are baked-in CDN URLs (the internal ids are not derivable from
-  the slug). Crests come from the feed. Both are cached in memory only.
+  the slug), in both variants: ESPN's "-dark" asset is a white knockout, so the
+  full-colour "500" asset is used in light mode. Crests come from the feed.
+  Both are cached in memory only.
+- Tomorrow is still fetched, but only so the menu bar can name the next
+  fixture once today's games finish. The dropdown lists today alone.

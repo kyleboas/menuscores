@@ -6,44 +6,62 @@ public struct League: Hashable, Sendable, Codable, Identifiable {
     public let sport: String       // "soccer"
     /// Shown before the name in the section header, as "England - Premier League".
     public let country: String?
-    /// Badge art. Baked in rather than fetched: these are stable CDN assets and
-    /// the internal ids they use are not derivable from the slug.
-    public let badge: URL?
+    /// Badge art, baked in rather than fetched: these are stable CDN assets
+    /// and the internal ids they use are not derivable from the slug.
+    ///
+    /// Two variants, because ESPN's "-dark" asset is a white knockout logo.
+    /// Using it on a light background made the Premier League badge invisible.
+    public let badgeLight: URL?   // full colour, for light backgrounds
+    public let badgeDark: URL?    // white knockout, for dark backgrounds
 
     public init(id: String, name: String, sport: String,
-                country: String? = nil, badge: String? = nil) {
+                country: String? = nil, badgeLight: String? = nil,
+                badgeDark: String? = nil) {
         self.id = id; self.name = name; self.sport = sport
         self.country = country
-        self.badge = badge.flatMap(URL.init(string:))
+        self.badgeLight = badgeLight.flatMap(URL.init(string:))
+        self.badgeDark = badgeDark.flatMap(URL.init(string:))
     }
+
+    public func badge(dark: Bool) -> URL? { dark ? badgeDark : badgeLight }
 
     public var displayName: String {
         guard let c = country else { return name }
         return "\(c) - \(name)"
     }
 
-    private static let soccer = "https://a.espncdn.com/i/leaguelogos/soccer/500-dark"
-    private static let us = "https://a.espncdn.com/i/teamlogos/leagues/500-dark"
+    private static func soccer(_ id: String) -> (String, String) {
+        ("https://a.espncdn.com/i/leaguelogos/soccer/500/\(id).png",
+         "https://a.espncdn.com/i/leaguelogos/soccer/500-dark/\(id).png")
+    }
+    private static func us(_ slug: String) -> (String, String) {
+        ("https://a.espncdn.com/i/teamlogos/leagues/500/\(slug).png",
+         "https://a.espncdn.com/i/teamlogos/leagues/500-dark/\(slug).png")
+    }
 
     public static let defaults: [League] = [
         League(id: "eng.1", name: "Premier League", sport: "soccer",
-               country: "England", badge: "\(soccer)/23.png"),
+               country: "England", badgeLight: soccer("23").0, badgeDark: soccer("23").1),
         League(id: "esp.1", name: "LaLiga", sport: "soccer",
-               country: "Spain", badge: "\(soccer)/15.png"),
+               country: "Spain", badgeLight: soccer("15").0, badgeDark: soccer("15").1),
         League(id: "ger.1", name: "Bundesliga", sport: "soccer",
-               country: "Germany", badge: "\(soccer)/10.png"),
+               country: "Germany", badgeLight: soccer("10").0, badgeDark: soccer("10").1),
         League(id: "ita.1", name: "Serie A", sport: "soccer",
-               country: "Italy", badge: "\(soccer)/12.png"),
+               country: "Italy", badgeLight: soccer("12").0, badgeDark: soccer("12").1),
         League(id: "fra.1", name: "Ligue 1", sport: "soccer",
-               country: "France", badge: "\(soccer)/9.png"),
+               country: "France", badgeLight: soccer("9").0, badgeDark: soccer("9").1),
         League(id: "uefa.champions", name: "Champions League", sport: "soccer",
-               country: "Europe", badge: "\(soccer)/2.png"),
+               country: "Europe", badgeLight: soccer("2").0, badgeDark: soccer("2").1),
         League(id: "usa.1", name: "MLS", sport: "soccer",
-               country: "USA", badge: "\(soccer)/19.png"),
-        League(id: "nfl", name: "NFL", sport: "football", badge: "\(us)/nfl.png"),
-        League(id: "nba", name: "NBA", sport: "basketball", badge: "\(us)/nba.png"),
-        League(id: "nhl", name: "NHL", sport: "hockey", badge: "\(us)/nhl.png"),
-        League(id: "mlb", name: "MLB", sport: "baseball", badge: "\(us)/mlb.png"),
+               country: "USA", badgeLight: soccer("19").0, badgeDark: soccer("19").1),
+        League(id: "nfl", name: "NFL", sport: "football",
+               badgeLight: us("nfl").0, badgeDark: us("nfl").1),
+        League(id: "nba", name: "NBA", sport: "basketball",
+               badgeLight: us("nba").0, badgeDark: us("nba").1),
+        League(id: "nhl", name: "NHL", sport: "hockey",
+               badgeLight: us("nhl").0, badgeDark: us("nhl").1),
+        League(id: "mlb", name: "MLB", sport: "baseball",
+               badgeLight: us("mlb").0, badgeDark: us("mlb").1),
     ]
 
     public static func named(_ id: String) -> League? {
@@ -108,10 +126,13 @@ public struct Game: Identifiable, Hashable, Sendable, Codable {
     public var badgeText: String? {
         switch state {
         case .live:
-            // "69'" -> "69"; keep "HT" and similar as-is.
-            let d = statusDetail.trimmingCharacters(in: .whitespaces)
-            let stripped = d.hasSuffix("'") ? String(d.dropLast()) : d
-            return stripped.isEmpty ? "LIVE" : stripped
+            // "69'" -> "69", and stoppage time "45'+1'" -> "45+1". Stripping
+            // only the trailing mark left an apostrophe stranded mid-badge.
+            let d = statusDetail
+                .trimmingCharacters(in: .whitespaces)
+                .replacingOccurrences(of: "'", with: "")
+                .replacingOccurrences(of: " ", with: "")
+            return d.isEmpty ? "LIVE" : d
         case .final:     return statusDetail.isEmpty ? "FT" : statusDetail
         case .postponed: return "PPD"
         case .canceled:  return "CANC"

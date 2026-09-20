@@ -14,7 +14,6 @@ public struct DropdownView: View {
     public var body: some View {
         VStack(spacing: 0) {
             statusBar
-            DayStrip(store: store)
             Divider().opacity(0.5)
 
             ScrollView {
@@ -61,19 +60,6 @@ public struct DropdownView: View {
         .padding(.horizontal, 14).padding(.top, 9).padding(.bottom, 7)
     }
 
-    private var emptyState: some View {
-        VStack(spacing: 4) {
-            Text("No games")
-                .font(.system(size: 12, weight: .medium)).foregroundStyle(.secondary)
-            Text(store.preferences.leagues.isEmpty
-                 ? "No leagues selected — open Settings."
-                 : "Nothing scheduled on \(store.label(for: store.selectedDay).lowercased()).")
-                .font(.system(size: 10)).foregroundStyle(.tertiary)
-                .multilineTextAlignment(.center)
-        }
-        .frame(maxWidth: .infinity).padding(.vertical, 28)
-    }
-
     private var footer: some View {
         HStack {
             Button("Settings…") { showingSettings = true }
@@ -86,33 +72,15 @@ public struct DropdownView: View {
     }
 }
 
-// MARK: - Day strip
-
-/// Yesterday / Today / Tomorrow / dates, scrolled so the selection is visible.
-struct DayStrip: View {
-    @Bindable var store: ScoreStore
-
-    var body: some View {
-        ScrollViewReader { proxy in
-            ScrollView(.horizontal, showsIndicators: false) {
-                DayTabs(store: store)
-            }
-            .onAppear { proxy.scrollTo(store.selectedDay, anchor: .center) }
-            .onChange(of: store.selectedDay) { _, new in
-                withAnimation(.easeOut(duration: 0.18)) {
-                    proxy.scrollTo(new, anchor: .center)
-                }
-            }
-        }
-    }
-}
-
 // MARK: - League card
 
 struct LeagueCard: View {
     @Bindable var store: ScoreStore
     let league: League
     let games: [Game]
+    /// The badge must match the background: ESPN's "-dark" asset is a white
+    /// knockout that disappears on a light one.
+    @Environment(\.colorScheme) private var colorScheme
 
     private var collapsed: Bool { store.preferences.isCollapsed(league) }
 
@@ -124,7 +92,7 @@ struct LeagueCard: View {
                 }
             } label: {
                 HStack(spacing: 8) {
-                    Crest(url: league.badge, size: 17)
+                    Crest(url: league.badge(dark: colorScheme == .dark), size: 17)
                     Text(league.displayName)
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(.primary)
@@ -163,14 +131,18 @@ struct GameRow: View {
     var body: some View {
         HStack(spacing: 5) {
             StatusBadge(game: game)
-                .frame(width: 24, alignment: .leading)
+                // Wide enough for stoppage time ("90+5"), the longest badge
+                // the feed produces. At 24pt it truncated to "4…".
+                .frame(width: 34, alignment: .leading)
 
             teamName(game.home.name, alignment: .trailing)
 
             Crest(url: game.home.crest, size: 16)
 
             centre
-                .frame(width: 46)
+                // Must hold "12:45 PM" on one line; at 42pt it wrapped to
+                // "3:00 P / M".
+                .frame(width: 52)
 
             Crest(url: game.away.crest, size: 16)
 
@@ -210,7 +182,8 @@ struct GameRow: View {
             Text(MenuBarTitle.clock(game.start, zone: zone))
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
-                .lineLimit(2)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
                 .multilineTextAlignment(.center)
         }
     }
@@ -227,7 +200,7 @@ struct StatusBadge: View {
                 .font(.system(size: 9, weight: .semibold))
                 .monospacedDigit()
                 .lineLimit(1)
-                .minimumScaleFactor(0.7)
+                .minimumScaleFactor(0.85)
                 .foregroundStyle(foreground)
                 .padding(.horizontal, 6).padding(.vertical, 3)
                 .background(Capsule().fill(background))
@@ -252,32 +225,7 @@ struct StatusBadge: View {
 
 // MARK: - Content, split out of its scroll containers
 
-/// The day buttons themselves. Separate from `DayStrip` so they can be
-/// rendered (and screenshotted) without a ScrollView around them.
-public struct DayTabs: View {
-    @Bindable var store: ScoreStore
-    public init(store: ScoreStore) { self.store = store }
-
-    public var body: some View {
-        HStack(spacing: 18) {
-            ForEach(store.dayStrip, id: \.self) { day in
-                let selected = day == store.selectedDay
-                Button { store.selectedDay = day } label: {
-                    Text(store.label(for: day))
-                        .font(.system(size: 13, weight: selected ? .bold : .medium))
-                        .foregroundStyle(selected ? Color.primary : Color.secondary)
-                        .fixedSize()
-                }
-                .buttonStyle(.plain)
-                .id(day)
-            }
-        }
-        .padding(.horizontal, 14)
-        .padding(.bottom, 8)
-    }
-}
-
-/// The league cards for the selected day.
+/// The league cards for today.
 public struct SectionList: View {
     @Bindable var store: ScoreStore
     public init(store: ScoreStore) { self.store = store }
@@ -291,7 +239,7 @@ public struct SectionList: View {
                         .foregroundStyle(.secondary)
                     Text(store.preferences.leagues.isEmpty
                          ? "No leagues selected — open Settings."
-                         : "Nothing scheduled on \(store.label(for: store.selectedDay).lowercased()).")
+                         : "Nothing scheduled today.")
                         .font(.system(size: 10)).foregroundStyle(.tertiary)
                         .multilineTextAlignment(.center)
                 }

@@ -4,6 +4,7 @@ import ScoreKit
 struct SettingsView: View {
     @Bindable var store: ScoreStore
     @Binding var isPresented: Bool
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -14,7 +15,7 @@ struct SettingsView: View {
                     ForEach(League.defaults) { league in
                         Toggle(isOn: binding(for: league)) {
                             HStack(spacing: 7) {
-                                Crest(url: league.badge, size: 15)
+                                Crest(url: league.badge(dark: colorScheme == .dark), size: 15)
                                 Text(league.displayName).font(.system(size: 12))
                             }
                         }

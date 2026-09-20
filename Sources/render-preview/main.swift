@@ -20,7 +20,7 @@ func run() async -> Int32 {
     app.setActivationPolicy(.accessory)
 
     let store = ScoreStore()
-    print("Fetching \(store.preferences.leagues.count) league(s) for \(store.selectedDay)…")
+    print("Fetching \(store.preferences.leagues.count) league(s) for \(store.today)…")
     await store.refresh()
 
     if let w = store.freshness.warning() {
@@ -32,7 +32,7 @@ func run() async -> Int32 {
     // Pre-warm every crest and badge so the synchronous render draws them.
     var urls: [URL] = []
     for s in sections {
-        if let b = s.league.badge { urls.append(b) }
+        if let b = s.league.badge(dark: dark) { urls.append(b) }
         for g in s.games {
             if let c = g.home.crest { urls.append(c) }
             if let c = g.away.crest { urls.append(c) }
@@ -48,14 +48,9 @@ func run() async -> Int32 {
     // Composed without the scroll containers: ImageRenderer does not lay out
     // ScrollView content, so rendering DropdownView directly yields a blank
     // middle. This mirrors what the real dropdown shows, fully expanded.
-    let view = VStack(spacing: 0) {
-        DayTabs(store: store)
-            .padding(.top, 10)
-        Divider().opacity(0.5)
-        SectionList(store: store)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 10)
-    }
+    let view = SectionList(store: store)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 10)
     .frame(width: 340)
     .environment(\.colorScheme, dark ? .dark : .light)
     .background(dark ? Color(white: 0.08) : Color(white: 0.97))
