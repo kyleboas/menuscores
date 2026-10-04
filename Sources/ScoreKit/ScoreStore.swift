@@ -156,6 +156,30 @@ public final class ScoreStore {
                 teamsByLeague[league.id] = teams
             }
         }
+        migrateLegacyFavorites()
+    }
+
+    /// Whether favourites saved before team ids carried their sport are
+    /// still waiting to be resolved against the team lists.
+    public var hasLegacyFavorites: Bool {
+        preferences.favoriteTeamIDs.contains { !$0.contains(":") }
+    }
+
+    /// Rewrites bare favourite ids saved by older builds. An id that names
+    /// exactly one team across the enabled leagues is kept under its sport;
+    /// one shared by several sports cannot be told apart and is dropped, so
+    /// it has to be starred again. Waits until every league's teams are in,
+    /// so a failed fetch cannot make an ambiguous id look unique.
+    func migrateLegacyFavorites() {
+        guard hasLegacyFavorites,
+              preferences.leagues.allSatisfy({ teamsByLeague[$0.id] != nil }) else { return }
+        let known = Set(teamsByLeague.values.joined().map(\.id))
+        var ids = preferences.favoriteTeamIDs.filter { $0.contains(":") }
+        for bare in preferences.favoriteTeamIDs where !bare.contains(":") {
+            let matches = known.filter { $0.hasSuffix(":" + bare) }
+            if matches.count == 1 { ids.formUnion(matches) }
+        }
+        preferences.favoriteTeamIDs = ids
     }
 
     public func isFavorite(_ team: Team) -> Bool {
@@ -173,6 +197,7 @@ public final class ScoreStore {
     // MARK: - Refresh
 
     public func start() {
+        if hasLegacyFavorites { Task { await loadTeams() } }
         timer?.cancel()
         timer = Task { [weak self] in
             var firstPass = true

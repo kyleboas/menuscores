@@ -83,7 +83,7 @@ public struct ESPNProvider: ScoreProvider {
         }
         return entries.compactMap { entry -> Team? in
             guard let t = entry["team"] as? [String: Any] else { return nil }
-            let id = (t["id"] as? String) ?? ""
+            let id = Team.id(sport: league.sport, feedID: (t["id"] as? String) ?? "")
             let name = (t["shortDisplayName"] as? String)
                 ?? (t["displayName"] as? String) ?? "—"
             let abbr = (t["abbreviation"] as? String) ?? String(name.prefix(3)).uppercased()
@@ -149,7 +149,8 @@ public struct ESPNProvider: ScoreProvider {
             competitors.first { ($0["homeAway"] as? String) == which }
         }
         guard let h = side("home"), let a = side("away"),
-              let homeTeam = team(from: h), let awayTeam = team(from: a) else { return nil }
+              let homeTeam = team(from: h, sport: league.sport),
+              let awayTeam = team(from: a, sport: league.sport) else { return nil }
 
         let statusObj = (comp["status"] ?? event["status"]) as? [String: Any]
         let type = statusObj?["type"] as? [String: Any]
@@ -164,9 +165,9 @@ public struct ESPNProvider: ScoreProvider {
                     statusDetail: detail)
     }
 
-    private func team(from c: [String: Any]) -> Team? {
+    private func team(from c: [String: Any], sport: String) -> Team? {
         guard let t = c["team"] as? [String: Any] else { return nil }
-        let id = (t["id"] as? String) ?? ""
+        let id = Team.id(sport: sport, feedID: (t["id"] as? String) ?? "")
         // shortDisplayName is the row-sized form ("Bournemouth"); fall back up
         // the chain when a sport does not provide it.
         let name = (t["shortDisplayName"] as? String)
