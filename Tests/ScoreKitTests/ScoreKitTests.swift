@@ -225,6 +225,32 @@ final class ScoreStoreTests: XCTestCase {
         XCTAssertEqual(store.sections.flatMap { $0.games }.map(\.id), ["y"])
     }
 
+    func testMidnightRollsTodayAndSelectionForward() async {
+        // A long-running app must not stay on its launch day: the strip,
+        // the selection and the fetched day all move on after midnight.
+        final class Clock: @unchecked Sendable { var now: Date; init(_ d: Date) { now = d } }
+        let clock = Clock(ESPNProvider.date(from: "2026-09-20T18:00Z")!)
+        let p = FakeProvider()
+        let store = ScoreStore(provider: p,
+                               preferences: Preferences(enabledLeagueIDs: ["eng.1"]),
+                               zone: zone, now: { clock.now })
+        let launchDay = store.today
+        XCTAssertFalse(store.syncDay(), "no rollover before midnight")
+
+        clock.now = ESPNProvider.date(from: "2026-10-04T14:00Z")!
+        let newDay = launchDay.adding(days: 14, in: zone)
+        p.byDay[newDay] = [game("oct4", at: "2026-10-04T17:00Z", state: .scheduled)]
+
+        XCTAssertTrue(store.syncDay())
+        XCTAssertEqual(store.today, newDay)
+        XCTAssertEqual(store.selectedDay, newDay)
+        XCTAssertEqual(store.label(for: newDay), "Today")
+        XCTAssertTrue(store.dayStrip.contains(newDay))
+
+        await store.refresh()
+        XCTAssertEqual(store.sections.flatMap { $0.games }.map(\.id), ["oct4"])
+    }
+
     func testDefaultSelectionIsToday() {
         let now = ESPNProvider.date(from: "2026-09-20T18:00Z")!
         let store = makeStore(FakeProvider(), now: now)
