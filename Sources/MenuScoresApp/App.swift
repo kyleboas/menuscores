@@ -73,8 +73,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ) { [store] _ in
             MainActor.assumeIsolated {
                 // Waking on a later date must not leave a stale day selected.
-                store.selectedDay = CivilDay.today(in: store.zone)
+                store.syncDay()
                 store.start()
+            }
+        }
+
+        // Midnight while awake: move onto the new day straight away rather
+        // than waiting for the next refresh tick, which can be minutes off.
+        NotificationCenter.default.addObserver(
+            forName: .NSCalendarDayChanged, object: nil, queue: .main
+        ) { [store] _ in
+            MainActor.assumeIsolated {
+                if store.syncDay() { store.start() }
             }
         }
     }

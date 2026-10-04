@@ -52,12 +52,29 @@ public final class ScoreStore {
         self.preferences = preferences
         self.zone = zone
         self.now = now
-        self.selectedDay = CivilDay.today(in: zone, now: now())
+        let t = CivilDay.today(in: zone, now: now())
+        self.today = t
+        self.selectedDay = t
     }
 
     // MARK: - Day strip
 
-    public var today: CivilDay { CivilDay.today(in: zone, now: now()) }
+    /// The civil day the store believes it is. Stored rather than derived from
+    /// the clock so the UI observes it: a computed value never invalidated the
+    /// views, which left a long-running app stuck on its launch day.
+    public private(set) var today: CivilDay
+
+    /// Moves the store onto the clock's day once midnight has passed. Returns
+    /// whether the day changed. A rollover reselects today, so the dropdown
+    /// never keeps showing a day that has become history.
+    @discardableResult
+    public func syncDay() -> Bool {
+        let t = CivilDay.today(in: zone, now: now())
+        guard t != today else { return false }
+        today = t
+        selectedDay = t
+        return true
+    }
 
     public var dayStrip: [CivilDay] {
         let t = today
@@ -161,10 +178,11 @@ public final class ScoreStore {
             var firstPass = true
             while !Task.isCancelled {
                 guard let self else { return }
+                let rolledOver = await MainActor.run { self.syncDay() }
                 // Full sweep on the first pass and on slow ticks; while games
                 // are live the fast tick only refetches today, because that is
                 // the only day whose scores can change.
-                let fast = await MainActor.run { !self.live.isEmpty } && !firstPass
+                let fast = await MainActor.run { !self.live.isEmpty } && !firstPass && !rolledOver
                 if fast {
                     await self.load(days: [self.today])
                 } else {
