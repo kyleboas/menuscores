@@ -760,6 +760,58 @@ final class FavoritesTests: XCTestCase {
                        "filtering must apply without waiting for a refetch")
     }
 
+    func testSameFeedIDInAnotherSportIsNotAlsoFavourited() async {
+        // ESPN numbers teams per sport: "22" is both the Cardinals and the
+        // Canucks. Starring one must not star the other.
+        let p = FakeProvider()
+        let cardinals = Team(id: Team.id(sport: "football", feedID: "22"),
+                             name: "Cardinals", abbreviation: "ARI")
+        let canucks = Team(id: Team.id(sport: "hockey", feedID: "22"),
+                           name: "Canucks", abbreviation: "VAN")
+        p.teamsByLeague["nfl"] = [cardinals]
+        p.teamsByLeague["nhl"] = [canucks]
+        let s = ScoreStore(provider: p,
+                           preferences: Preferences(enabledLeagueIDs: ["nfl", "nhl"]),
+                           zone: zone)
+        await s.loadTeams()
+
+        s.toggleFavorite(cardinals)
+        XCTAssertTrue(s.isFavorite(cardinals))
+        XCTAssertFalse(s.isFavorite(canucks))
+    }
+
+    func testLegacyBareFavouritesMigrateOnlyWhenUnambiguous() async {
+        let p = FakeProvider()
+        p.teamsByLeague["eng.1"] = [Team(id: "soccer:360", name: "Man United", abbreviation: "MUN")]
+        p.teamsByLeague["nfl"] = [Team(id: "football:22", name: "Cardinals", abbreviation: "ARI")]
+        p.teamsByLeague["nhl"] = [Team(id: "hockey:22", name: "Canucks", abbreviation: "VAN")]
+        let s = ScoreStore(provider: p,
+                           preferences: Preferences(enabledLeagueIDs: ["eng.1", "nfl", "nhl"],
+                                                    favoriteTeamIDs: ["360", "22", "hockey:1"]),
+                           zone: zone)
+        XCTAssertTrue(s.hasLegacyFavorites)
+        await s.loadTeams()
+
+        XCTAssertEqual(s.preferences.favoriteTeamIDs, ["soccer:360", "hockey:1"],
+                       "unique ids keep their team; ambiguous ones are dropped")
+        XCTAssertFalse(s.hasLegacyFavorites)
+    }
+
+    func testLegacyMigrationWaitsForEveryLeague() async {
+        // If the NHL list failed to load, "22" would look like it only meant
+        // the Cardinals. Nothing may be rewritten until all lists are in.
+        let p = FakeProvider()
+        p.teamsByLeague["nfl"] = [Team(id: "football:22", name: "Cardinals", abbreviation: "ARI")]
+        let s = ScoreStore(provider: p,
+                           preferences: Preferences(enabledLeagueIDs: ["nfl"],
+                                                    favoriteTeamIDs: ["22"]),
+                           zone: zone)
+        s.preferences.enabledLeagueIDs.insert("nhl")
+        p.failure = .transport("offline")
+        await s.loadTeams()
+        XCTAssertEqual(s.preferences.favoriteTeamIDs, ["22"])
+    }
+
     func testTeamsAreOnlyFetchedOncePerLeague() async {
         let p = FakeProvider()
         p.teamsByLeague["eng.1"] = [team("1", "ARS")]

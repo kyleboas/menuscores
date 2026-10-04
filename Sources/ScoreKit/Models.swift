@@ -70,6 +70,9 @@ public struct League: Hashable, Sendable, Codable, Identifiable {
 }
 
 public struct Team: Hashable, Sendable, Codable {
+    /// Sport-qualified, e.g. "football:22". ESPN's own team ids restart per
+    /// sport — "22" is the Cardinals, Trail Blazers, Canucks and Phillies — so
+    /// a bare id starred one team and silently favourited the other three.
     public let id: String
     /// Short form — "Bournemouth", not "AFC Bournemouth". This is what fits a
     /// menu bar dropdown row.
@@ -79,6 +82,11 @@ public struct Team: Hashable, Sendable, Codable {
 
     public init(id: String, name: String, abbreviation: String, crest: URL? = nil) {
         self.id = id; self.name = name; self.abbreviation = abbreviation; self.crest = crest
+    }
+
+    /// The `id` for a team as the feed numbers it within `sport`.
+    public static func id(sport: String, feedID: String) -> String {
+        "\(sport):\(feedID)"
     }
 }
 
