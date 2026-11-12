@@ -10,7 +10,9 @@ public struct Preferences: Codable, Sendable, Equatable {
     public var collapsedLeagueIDs: Set<String>
 
     public init(enabledLeagueIDs: Set<String> = ["eng.1", "esp.1", "ger.1",
-                                                 "ita.1", "fra.1", "uefa.champions"],
+                                                 "ita.1", "fra.1", "uefa.champions",
+                                                 "fifa.world", "fifa.worldq.uefa",
+                                                 "uefa.nations", "uefa.euro"],
                 favoriteTeamIDs: Set<String> = [],
                 favoritesOnly: Bool = false,
                 collapsedLeagueIDs: Set<String> = []) {

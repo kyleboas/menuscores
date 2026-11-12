@@ -33,14 +33,20 @@ struct LeaguesTab: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 7) {
-                    ForEach(League.defaults) { league in
-                        Toggle(isOn: binding(for: league)) {
-                            HStack(spacing: 8) {
-                                Crest(url: league.badge(dark: colorScheme == .dark), size: 16)
-                                Text(league.displayName)
+                    ForEach(groups, id: \.title) { group in
+                        Text(group.title)
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                            .padding(.top, group.title == groups.first?.title ? 0 : 6)
+                        ForEach(group.leagues) { league in
+                            Toggle(isOn: binding(for: league)) {
+                                HStack(spacing: 8) {
+                                    Crest(url: league.badge(dark: colorScheme == .dark), size: 16)
+                                    Text(league.displayName)
+                                }
                             }
+                            .toggleStyle(.checkbox)
                         }
-                        .toggleStyle(.checkbox)
                     }
                 }
                 .padding(.vertical, 4)
@@ -48,6 +54,17 @@ struct LeaguesTab: View {
             Spacer(minLength: 0)
         }
         .padding(18)
+    }
+
+    /// Club soccer, national teams, then everything else, so the twenty-odd
+    /// entries read as three short lists.
+    private var groups: [(title: String, leagues: [League])] {
+        let all = League.defaults
+        return [
+            ("Club soccer", all.filter { $0.sport == "soccer" && !$0.isInternational }),
+            ("International", all.filter(\.isInternational)),
+            ("Other sports", all.filter { $0.sport != "soccer" }),
+        ]
     }
 
     private func binding(for league: League) -> Binding<Bool> {

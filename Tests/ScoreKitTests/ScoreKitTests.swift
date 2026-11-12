@@ -593,6 +593,20 @@ final class LeagueDisplayTests: XCTestCase {
         XCTAssertEqual(League.named("fra.1")?.displayName, "France - Ligue 1")
     }
 
+    func testInternationalCompetitionsAreListed() {
+        XCTAssertEqual(League.named("uefa.nations")?.displayName, "Europe - Nations League")
+        XCTAssertEqual(League.named("fifa.friendly")?.displayName, "International - Friendlies")
+        XCTAssertTrue(League.named("fifa.world")!.isInternational)
+        XCTAssertFalse(League.named("eng.1")!.isInternational)
+        // Every international entry is reachable through `defaults`, which is
+        // what Settings and Preferences.leagues read.
+        for l in League.international {
+            XCTAssertNotNil(League.named(l.id), l.id)
+        }
+        XCTAssertEqual(Set(League.defaults.map(\.id)).count, League.defaults.count,
+                       "league ids must be unique")
+    }
+
     func testUSLeaguesHaveNoCountryPrefix() {
         XCTAssertEqual(League.named("nfl")?.displayName, "NFL")
     }
