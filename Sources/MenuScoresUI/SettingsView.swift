@@ -180,10 +180,9 @@ struct TeamToggleRow: View {
 
     var body: some View {
         let status = store.status(of: team)
+        // Toggles lead the row: on the right, the overlay scroll bar sat
+        // on top of the eye button.
         HStack(spacing: 8) {
-            Crest(url: team.crest, size: 16)
-            Text(team.name).font(.system(size: 12))
-            Spacer()
             toggle("star", on: status == .following, tint: .yellow,
                    help: "Follow: every game") {
                 store.setStatus(status == .following ? .none : .following, for: team)
@@ -192,6 +191,9 @@ struct TeamToggleRow: View {
                    help: "Watch: only games against teams you follow or watch") {
                 store.setStatus(status == .watching ? .none : .watching, for: team)
             }
+            Crest(url: team.crest, size: 16)
+            Text(team.name).font(.system(size: 12))
+            Spacer()
         }
         .padding(.vertical, 3)
     }
