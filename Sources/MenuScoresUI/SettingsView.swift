@@ -85,7 +85,7 @@ struct FavoritesTab: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Toggle("Show only teams I follow", isOn: $store.preferences.favoritesOnly)
+            Toggle("Show only games of teams I follow or watch", isOn: $store.preferences.favoritesOnly)
                 .toggleStyle(.checkbox)
 
             HStack(spacing: 6) {
@@ -111,7 +111,7 @@ struct FavoritesTab: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                Text("A starred team's games show in every competition it plays in — cups, Europe, friendlies — even ones not enabled under Leagues.")
+                Text("Following (star): every game, against anyone. Watching (eye): only games against another team you follow or watch. Both reach every competition — cups, Europe, friendlies — even ones not enabled under Leagues.")
                     .font(.system(size: 11)).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 ScrollView {
@@ -157,7 +157,8 @@ struct FavoritesTab: View {
                             .sorted { $0.name < $1.name }
             if !list.isEmpty { out.append((title, list)) }
         }
-        add("Following", store.followedTeams)
+        add("Following", store.teams(.following))
+        add("Watching", store.teams(.watching))
         let leagues = store.preferences.leagues
         func teams(_ ls: [League]) -> [Team] {
             ls.flatMap { store.teamsByLeague[$0.id] ?? [] }
@@ -178,20 +179,33 @@ struct TeamToggleRow: View {
     let team: Team
 
     var body: some View {
-        Button {
-            store.toggleFavorite(team)
-        } label: {
-            HStack(spacing: 8) {
-                Image(systemName: store.isFavorite(team) ? "star.fill" : "star")
-                    .font(.system(size: 11))
-                    .foregroundStyle(store.isFavorite(team) ? .yellow : .secondary)
-                Crest(url: team.crest, size: 16)
-                Text(team.name).font(.system(size: 12))
-                Spacer()
+        let status = store.status(of: team)
+        HStack(spacing: 8) {
+            Crest(url: team.crest, size: 16)
+            Text(team.name).font(.system(size: 12))
+            Spacer()
+            toggle("star", on: status == .following, tint: .yellow,
+                   help: "Follow: every game") {
+                store.setStatus(status == .following ? .none : .following, for: team)
             }
-            .padding(.vertical, 3)
-            .contentShape(Rectangle())
+            toggle("eye", on: status == .watching, tint: .blue,
+                   help: "Watch: only games against teams you follow or watch") {
+                store.setStatus(status == .watching ? .none : .watching, for: team)
+            }
+        }
+        .padding(.vertical, 3)
+    }
+
+    private func toggle(_ symbol: String, on: Bool, tint: Color, help: String,
+                        action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: on ? symbol + ".fill" : symbol)
+                .font(.system(size: 11))
+                .foregroundStyle(on ? tint : .secondary)
+                .frame(width: 20, height: 18)
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .help(help)
     }
 }

@@ -319,7 +319,7 @@ public struct SectionList: View {
 
 // MARK: - Head-to-head
 
-/// Games where both sides are followed teams, across every competition:
+/// Games where both sides are followed or watched, across every competition:
 /// what is coming up this season, then the last few results.
 public struct HeadToHeadList: View {
     @Bindable var store: ScoreStore
@@ -333,8 +333,8 @@ public struct HeadToHeadList: View {
                     Text(store.loadingSchedules ? "Loading schedules…" : "No head-to-head games")
                         .font(.system(size: 12, weight: .medium))
                         .foregroundStyle(.secondary)
-                    Text(store.preferences.favoriteTeamIDs.count < 2
-                         ? "Star at least two teams in Settings → Teams."
+                    Text(store.preferences.trackedTeamIDs.count < 2
+                         ? "Follow or watch at least two teams in Settings → Teams."
                          : "None of your teams play each other this season.")
                         .font(.system(size: 10)).foregroundStyle(.tertiary)
                         .multilineTextAlignment(.center)

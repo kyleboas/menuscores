@@ -673,8 +673,50 @@ final class FollowingTests: XCTestCase {
         p.schedules[ars.id] = [g("x", cup, "2026-10-27T19:00Z", ips, ars)]
         let s = store(p, favorites: [ars.id])
         await s.loadSchedules()
-        XCTAssertEqual(s.followedTeams.map(\.name), ["Arsenal"],
+        XCTAssertEqual(s.teams(.following).map(\.name), ["Arsenal"],
                        "a followed team stays listed with its league switched off")
+    }
+
+    func testWatchedTeamShowsOnlyAgainstTrackedOpponents() async {
+        let p = FakeProvider()
+        let bha = Team(id: "soccer:331", name: "Brighton", abbreviation: "BHA")
+        let vsFollowed = g("w1", cup, "2026-09-20T15:00Z", ips, ars)   // watched v followed
+        let vsWatched = g("w2", cup, "2026-09-20T17:00Z", ips, bha)    // watched v watched
+        let vsNobody = g("w3", cup, "2026-09-20T19:00Z", ips, mci)     // watched v untracked
+        p.schedules[ips.id] = [vsFollowed, vsWatched, vsNobody]
+        p.schedules[bha.id] = [vsWatched]
+        p.schedules[ars.id] = [vsFollowed]
+        let s = ScoreStore(provider: p,
+                           preferences: Preferences(enabledLeagueIDs: [], favoriteTeamIDs: [ars.id],
+                                                    watchingTeamIDs: [ips.id, bha.id]),
+                           zone: zone, now: { [now] in now })
+        p.byLeague[cup.id] = [s.today: [vsFollowed, vsWatched, vsNobody]]
+        await s.loadSchedules()
+        await s.refresh()
+        XCTAssertEqual(s.games(on: s.today).map(\.id).sorted(), ["w1", "w2"])
+        XCTAssertEqual(s.headToHead.upcoming.map(\.id).sorted(), ["w1", "w2"])
+    }
+
+    func testFollowedTeamShowsAgainstAnyone() {
+        let prefs = Preferences(favoriteTeamIDs: [ars.id], watchingTeamIDs: [ips.id])
+        XCTAssertTrue(prefs.isOfInterest(g("a", cup, "2026-09-20T15:00Z", mci, ars)))
+        XCTAssertFalse(prefs.isOfInterest(g("b", cup, "2026-09-20T15:00Z", mci, ips)))
+    }
+
+    func testATeamIsOnOneListAtATime() {
+        let s = store(FakeProvider(), favorites: [ars.id])
+        s.setStatus(.watching, for: ars)
+        XCTAssertEqual(s.status(of: ars), .watching)
+        XCTAssertFalse(s.preferences.favoriteTeamIDs.contains(ars.id))
+        s.setStatus(.none, for: ars)
+        XCTAssertTrue(s.preferences.trackedTeamIDs.isEmpty)
+    }
+
+    func testOlderSettingsDecodeWithNoWatchingList() throws {
+        let json = #"{"enabledLeagueIDs":["eng.1"],"favoriteTeamIDs":["soccer:359"],"favoritesOnly":true}"#
+        let p = try JSONDecoder().decode(Preferences.self, from: Data(json.utf8))
+        XCTAssertEqual(p.favoriteTeamIDs, ["soccer:359"])
+        XCTAssertTrue(p.watchingTeamIDs.isEmpty)
     }
 
     func testUnfollowingDropsTheSchedule() async {
