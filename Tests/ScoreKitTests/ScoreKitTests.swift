@@ -20,9 +20,19 @@ private final class FakeProvider: ScoreProvider, @unchecked Sendable {
     var failure: ProviderError?
     var calendar: Set<CivilDay>?
 
+    /// Per-competition days; a league with no entry here falls back to `byDay`.
+    var byLeague: [String: [CivilDay: [Game]]] = [:]
+    var fetchedLeagues: [String] = []
     func games(on day: CivilDay, league: League, zone: TimeZone) async throws -> [Game] {
+        fetchedLeagues.append(league.id)
         if let f = failure { throw f }
+        if let l = byLeague[league.id] { return l[day] ?? [] }
         return byDay[day] ?? []
+    }
+    var schedules: [String: [Game]] = [:]
+    func schedule(for teamID: String) async throws -> [Game] {
+        if let f = failure { throw f }
+        return schedules[teamID] ?? []
     }
     func fixtureDays(from: CivilDay, through: CivilDay, league: League,
                      zone: TimeZone) async throws -> Set<CivilDay>? {
@@ -586,11 +596,159 @@ final class StatusBadgeTextTests: XCTestCase {
     }
 }
 
+@MainActor
+final class FollowingTests: XCTestCase {
+    private let zone = TimeZone(identifier: "America/New_York")!
+    private let cup = League(id: "eng.league_cup", name: "Carabao Cup", sport: "soccer")
+    private let now = ESPNProvider.date(from: "2026-09-20T12:00Z")!
+    private let ars = Team(id: "soccer:359", name: "Arsenal", abbreviation: "ARS")
+    private let mci = Team(id: "soccer:382", name: "Man City", abbreviation: "MNC")
+    private let ips = Team(id: "soccer:373", name: "Ipswich", abbreviation: "IPS")
+
+    private func g(_ id: String, _ league: League, _ iso: String, _ h: Team, _ a: Team,
+                   state: GameState = .scheduled) -> Game {
+        Game(id: id, league: league, start: ESPNProvider.date(from: iso)!, state: state,
+             home: h, away: a, homeScore: nil, awayScore: nil, statusDetail: "")
+    }
+
+    private func store(_ p: FakeProvider, favorites: Set<String>) -> ScoreStore {
+        ScoreStore(provider: p,
+                   preferences: Preferences(enabledLeagueIDs: ["eng.1"], favoriteTeamIDs: favorites),
+                   zone: zone, now: { [now] in now })
+    }
+
+    func testFollowedTeamsCupGameShowsWithoutEnablingTheCup() async {
+        let p = FakeProvider()
+        let tie = g("tie", cup, "2026-09-20T19:00Z", ips, ars)
+        let other = g("other", cup, "2026-09-20T19:00Z", mci, ips)
+        p.schedules[ars.id] = [tie]
+        let s = store(p, favorites: [ars.id])
+        p.byLeague[cup.id] = [s.today: [tie, other]]
+        p.byLeague["eng.1"] = [:]
+
+        await s.loadSchedules()
+        await s.refresh()
+        XCTAssertTrue(p.fetchedLeagues.contains(cup.id), "the cup's scoreboard is fetched on the tie's day")
+        XCTAssertEqual(s.sections.map(\.league.id), [cup.id])
+        XCTAssertEqual(s.sections.flatMap(\.games).map(\.id), ["tie"],
+                       "a competition that is not enabled shows only followed teams' games")
+    }
+
+    func testScheduleEntryStandsInWhenNoScoreboardHasTheGame() async {
+        let p = FakeProvider()
+        let friendly = League(id: "club.friendly", name: "Club Friendly", sport: "soccer")
+        let tie = g("f", friendly, "2026-09-20T19:00Z", ips, ars)
+        p.schedules[ars.id] = [tie]
+        let s = store(p, favorites: [ars.id])
+        await s.loadSchedules()
+        await s.refresh()
+        XCTAssertEqual(s.games(on: s.today).map(\.id), ["f"])
+    }
+
+    func testExtraCompetitionsAreOnlyFetchedOnDaysTheTeamPlays() async {
+        let p = FakeProvider()
+        p.schedules[ars.id] = [g("later", cup, "2026-10-27T19:00Z", ips, ars)]
+        let s = store(p, favorites: [ars.id])
+        await s.loadSchedules()
+        await s.refresh()
+        XCTAssertFalse(p.fetchedLeagues.contains(cup.id))
+    }
+
+    func testHeadToHeadListsOnlyGamesBetweenFollowedTeams() async {
+        let p = FakeProvider()
+        let derby = g("h2h", epl, "2026-11-29T16:30Z", mci, ars)
+        let past = g("old", epl, "2026-08-16T14:00Z", mci, ars, state: .final)
+        let notH2H = g("no", cup, "2026-10-27T19:00Z", ips, ars)
+        p.schedules[ars.id] = [derby, past, notH2H]
+        p.schedules[mci.id] = [derby, past]
+        let s = store(p, favorites: [ars.id, mci.id])
+        await s.loadSchedules()
+        let h = s.headToHead
+        XCTAssertEqual(h.upcoming.map(\.id), ["h2h"])
+        XCTAssertEqual(h.recent.map(\.id), ["old"])
+    }
+
+    func testFollowedTeamsAreKnownFromTheirSchedules() async {
+        let p = FakeProvider()
+        p.schedules[ars.id] = [g("x", cup, "2026-10-27T19:00Z", ips, ars)]
+        let s = store(p, favorites: [ars.id])
+        await s.loadSchedules()
+        XCTAssertEqual(s.teams(.following).map(\.name), ["Arsenal"],
+                       "a followed team stays listed with its league switched off")
+    }
+
+    func testWatchedTeamShowsOnlyAgainstTrackedOpponents() async {
+        let p = FakeProvider()
+        let bha = Team(id: "soccer:331", name: "Brighton", abbreviation: "BHA")
+        let vsFollowed = g("w1", cup, "2026-09-20T15:00Z", ips, ars)   // watched v followed
+        let vsWatched = g("w2", cup, "2026-09-20T17:00Z", ips, bha)    // watched v watched
+        let vsNobody = g("w3", cup, "2026-09-20T19:00Z", ips, mci)     // watched v untracked
+        p.schedules[ips.id] = [vsFollowed, vsWatched, vsNobody]
+        p.schedules[bha.id] = [vsWatched]
+        p.schedules[ars.id] = [vsFollowed]
+        let s = ScoreStore(provider: p,
+                           preferences: Preferences(enabledLeagueIDs: [], favoriteTeamIDs: [ars.id],
+                                                    watchingTeamIDs: [ips.id, bha.id]),
+                           zone: zone, now: { [now] in now })
+        p.byLeague[cup.id] = [s.today: [vsFollowed, vsWatched, vsNobody]]
+        await s.loadSchedules()
+        await s.refresh()
+        XCTAssertEqual(s.games(on: s.today).map(\.id).sorted(), ["w1", "w2"])
+        XCTAssertEqual(s.headToHead.upcoming.map(\.id).sorted(), ["w1", "w2"])
+    }
+
+    func testFollowedTeamShowsAgainstAnyone() {
+        let prefs = Preferences(favoriteTeamIDs: [ars.id], watchingTeamIDs: [ips.id])
+        XCTAssertTrue(prefs.isOfInterest(g("a", cup, "2026-09-20T15:00Z", mci, ars)))
+        XCTAssertFalse(prefs.isOfInterest(g("b", cup, "2026-09-20T15:00Z", mci, ips)))
+    }
+
+    func testATeamIsOnOneListAtATime() {
+        let s = store(FakeProvider(), favorites: [ars.id])
+        s.setStatus(.watching, for: ars)
+        XCTAssertEqual(s.status(of: ars), .watching)
+        XCTAssertFalse(s.preferences.favoriteTeamIDs.contains(ars.id))
+        s.setStatus(.none, for: ars)
+        XCTAssertTrue(s.preferences.trackedTeamIDs.isEmpty)
+    }
+
+    func testOlderSettingsDecodeWithNoWatchingList() throws {
+        let json = #"{"enabledLeagueIDs":["eng.1"],"favoriteTeamIDs":["soccer:359"],"favoritesOnly":true}"#
+        let p = try JSONDecoder().decode(Preferences.self, from: Data(json.utf8))
+        XCTAssertEqual(p.favoriteTeamIDs, ["soccer:359"])
+        XCTAssertTrue(p.watchingTeamIDs.isEmpty)
+    }
+
+    func testUnfollowingDropsTheSchedule() async {
+        let p = FakeProvider()
+        p.schedules[ars.id] = [g("x", cup, "2026-10-27T19:00Z", ips, ars)]
+        let s = store(p, favorites: [ars.id])
+        await s.loadSchedules()
+        s.preferences.favoriteTeamIDs = []
+        await s.loadSchedules()
+        XCTAssertTrue(s.schedules.isEmpty)
+    }
+}
+
 final class LeagueDisplayTests: XCTestCase {
     func testSoccerLeaguesShowCountryPrefix() {
         XCTAssertEqual(League.named("eng.1")?.displayName, "England - Premier League")
         XCTAssertEqual(League.named("esp.1")?.displayName, "Spain - LaLiga")
         XCTAssertEqual(League.named("fra.1")?.displayName, "France - Ligue 1")
+    }
+
+    func testInternationalCompetitionsAreListed() {
+        XCTAssertEqual(League.named("uefa.nations")?.displayName, "Europe - Nations League")
+        XCTAssertEqual(League.named("fifa.friendly")?.displayName, "International - Friendlies")
+        XCTAssertTrue(League.named("fifa.world")!.isInternational)
+        XCTAssertFalse(League.named("eng.1")!.isInternational)
+        // Every international entry is reachable through `defaults`, which is
+        // what Settings and Preferences.leagues read.
+        for l in League.international {
+            XCTAssertNotNil(League.named(l.id), l.id)
+        }
+        XCTAssertEqual(Set(League.defaults.map(\.id)).count, League.defaults.count,
+                       "league ids must be unique")
     }
 
     func testUSLeaguesHaveNoCountryPrefix() {

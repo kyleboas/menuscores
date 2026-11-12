@@ -96,6 +96,66 @@ public struct ESPNProvider: ScoreProvider {
         .sorted { $0.name < $1.name }
     }
 
+    // MARK: - Team schedules
+
+    /// Soccer has a cross-competition path, `soccer/all/teams/{id}/schedule`:
+    /// league, cups, continental and friendlies in one list, each event
+    /// carrying its own `league`. Without `fixture=true` it returns results
+    /// only; with it, fixtures only — so both are fetched.
+    ///
+    /// US sports have no `all` path (it returns 400), but each of them is one
+    /// league here, and that league's schedule is the whole season.
+    public func schedule(for teamID: String) async throws -> [Game] {
+        let parts = teamID.split(separator: ":", maxSplits: 1).map(String.init)
+        guard parts.count == 2 else { return [] }
+        let (sport, feedID) = (parts[0], parts[1])
+
+        let home: League
+        let paths: [String]
+        if sport == "soccer" {
+            home = League(id: "all", name: "Soccer", sport: "soccer")
+            let p = "\(base)/soccer/all/teams/\(feedID)/schedule"
+            paths = [p, p + "?fixture=true"]
+        } else {
+            guard let l = League.defaults.first(where: { $0.sport == sport }) else { return [] }
+            home = l
+            paths = ["\(base)/\(sport)/\(l.id)/teams/\(feedID)/schedule"]
+        }
+
+        var games: [Game] = []
+        var lastError: Error?
+        for path in paths {
+            guard let url = URL(string: path) else { continue }
+            do {
+                let json = try await fetch(url)
+                for event in json["events"] as? [[String: Any]] ?? [] {
+                    let league = Self.league(of: event, sport: sport) ?? home
+                    if let g = parse(event, league: league) { games.append(g) }
+                }
+            } catch { lastError = error }
+        }
+        if games.isEmpty, let e = lastError { throw e }
+        var seen = Set<String>()
+        return games.filter { seen.insert($0.id).inserted }
+    }
+
+    /// The competition an event belongs to. A known slug reuses the built-in
+    /// entry so it keeps its country label; anything else (cups, friendlies)
+    /// is built from the event, with the badge from `alternateId`, which is
+    /// the league's logo id.
+    static func league(of event: [String: Any], sport: String) -> League? {
+        guard let l = event["league"] as? [String: Any],
+              let slug = l["slug"] as? String, !slug.isEmpty else { return nil }
+        if let known = League.named(slug) { return known }
+        let name = (l["shortName"] as? String) ?? (l["name"] as? String) ?? slug
+        var light: String?, dark: String?
+        if sport == "soccer", let logo = l["alternateId"] as? String, !logo.isEmpty {
+            light = "https://a.espncdn.com/i/leaguelogos/soccer/500/\(logo).png"
+            dark = "https://a.espncdn.com/i/leaguelogos/soccer/500-dark/\(logo).png"
+        }
+        return League(id: slug, name: name, sport: sport, badgeLight: light, badgeDark: dark)
+    }
+
     // MARK: - Parsing
 
     /// ESPN emits "2026-09-20T13:00Z" (no seconds) and occasionally
@@ -175,14 +235,22 @@ public struct ESPNProvider: ScoreProvider {
             ?? (t["name"] as? String) ?? "—"
         let abbr = (t["abbreviation"] as? String)
             ?? String(name.prefix(3)).uppercased()
-        let crest = (t["logo"] as? String).flatMap(URL.init(string:))
-        return Team(id: id, name: name, abbreviation: abbr, crest: crest)
+        // Scoreboards give `logo`; team schedules give a `logos` array.
+        let logo = (t["logo"] as? String)
+            ?? ((t["logos"] as? [[String: Any]])?.first?["href"] as? String)
+        return Team(id: id, name: name, abbreviation: abbr,
+                    crest: logo.flatMap(URL.init(string:)))
     }
 
     private static func score(_ c: [String: Any]) -> Int? {
         if let s = c["score"] as? String { return Int(s) }
         if let n = c["score"] as? Int { return n }
         if let d = c["score"] as? Double { return Int(d) }
+        // Team schedules wrap it: {"value": 1.0, "displayValue": "1"}.
+        if let o = c["score"] as? [String: Any] {
+            if let s = o["displayValue"] as? String, let n = Int(s) { return n }
+            if let v = o["value"] as? Double { return Int(v) }
+        }
         return nil
     }
 

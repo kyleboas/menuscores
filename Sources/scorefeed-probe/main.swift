@@ -93,6 +93,33 @@ do {
     print("  [INFO] legacy date-range syntax unreachable: \(error.localizedDescription)")
 }
 
+// 4b. Following a team across competitions. Arsenal (club: league, cups,
+//     Europe) and England (country: Nations League, friendlies, qualifying)
+//     must each come back in more than one competition, with scores parsed
+//     from the schedule's wrapped score objects.
+print("Team schedules across competitions")
+for (id, label) in [("soccer:359", "Arsenal"), ("soccer:448", "England"), ("basketball:13", "Lakers")] {
+    do {
+        let games = try await provider.schedule(for: id)
+        let comps = Set(games.map(\.league.id))
+        let finals = games.filter { $0.state == .final }
+        let scored = finals.filter(\.hasScore)
+        let upcoming = games.filter { $0.state == .scheduled }.count
+        let needsMany = id.hasPrefix("soccer")
+        check("\(label): \(games.count) games, \(upcoming) upcoming", !games.isEmpty && upcoming > 0)
+        if needsMany {
+            check("\(label) spans competitions", comps.count > 1, comps.sorted().joined(separator: ", "))
+            check("\(label) unknown competitions have names and badges",
+                  games.allSatisfy { !$0.league.name.isEmpty && $0.league.badge(dark: false) != nil },
+                  "")
+        }
+        check("\(label) results carry scores", finals.isEmpty || scored.count == finals.count,
+              "\(scored.count)/\(finals.count)")
+    } catch {
+        check("\(label) schedule", false, "\(error)")
+    }
+}
+print("")
 
 // 5. End-to-end: drive the real store through the real provider and render
 //    exactly what the menu bar would show. Proves the whole chain, not the parts.

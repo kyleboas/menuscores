@@ -54,6 +54,7 @@ public struct League: Hashable, Sendable, Codable, Identifiable {
                country: "Europe", badgeLight: soccer("2").0, badgeDark: soccer("2").1),
         League(id: "usa.1", name: "MLS", sport: "soccer",
                country: "USA", badgeLight: soccer("19").0, badgeDark: soccer("19").1),
+    ] + international + [
         League(id: "nfl", name: "NFL", sport: "football",
                badgeLight: us("nfl").0, badgeDark: us("nfl").1),
         League(id: "nba", name: "NBA", sport: "basketball",
@@ -63,6 +64,34 @@ public struct League: Hashable, Sendable, Codable, Identifiable {
         League(id: "mlb", name: "MLB", sport: "baseball",
                badgeLight: us("mlb").0, badgeDark: us("mlb").1),
     ]
+
+    /// National-team competitions. Team ids are shared with every other
+    /// soccer competition in the feed (England is 448 in friendlies, the
+    /// Nations League and qualifying alike), so one favourite star follows a
+    /// country through all of them. Badge ids are the feed's logo ids, which
+    /// differ from the league ids: read from each scoreboard's `logos`.
+    public static let international: [League] = [
+        League(id: "fifa.world", name: "World Cup", sport: "soccer",
+               country: "International", badgeLight: soccer("4").0, badgeDark: soccer("4").1),
+        League(id: "fifa.worldq.uefa", name: "World Cup Qualifying", sport: "soccer",
+               country: "Europe", badgeLight: soccer("67").0, badgeDark: soccer("67").1),
+        League(id: "uefa.nations", name: "Nations League", sport: "soccer",
+               country: "Europe", badgeLight: soccer("2395").0, badgeDark: soccer("2395").1),
+        League(id: "uefa.euro", name: "European Championship", sport: "soccer",
+               country: "Europe", badgeLight: soccer("74").0, badgeDark: soccer("74").1),
+        League(id: "uefa.euroq", name: "Euro Qualifying", sport: "soccer",
+               country: "Europe", badgeLight: soccer("56").0, badgeDark: soccer("56").1),
+        League(id: "conmebol.america", name: "Copa América", sport: "soccer",
+               country: "South America", badgeLight: soccer("83").0, badgeDark: soccer("83").1),
+        League(id: "concacaf.gold", name: "Gold Cup", sport: "soccer",
+               country: "North America", badgeLight: soccer("59").0, badgeDark: soccer("59").1),
+        League(id: "concacaf.nations.league", name: "Nations League", sport: "soccer",
+               country: "North America", badgeLight: soccer("2406").0, badgeDark: soccer("2406").1),
+        League(id: "fifa.friendly", name: "Friendlies", sport: "soccer",
+               country: "International", badgeLight: soccer("53").0, badgeDark: soccer("53").1),
+    ]
+
+    public var isInternational: Bool { Self.international.contains { $0.id == id } }
 
     public static func named(_ id: String) -> League? {
         defaults.first { $0.id == id }

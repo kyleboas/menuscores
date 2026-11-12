@@ -25,9 +25,16 @@ func run() async -> Int32 {
     if let override = ProcessInfo.processInfo.environment["MENUSCORES_LEAGUES"] {
         let ids = Set(override.split(separator: ",").map(String.init))
         store = ScoreStore(preferences: Preferences(enabledLeagueIDs: ids))
+    } else if let d = UserDefaults(suiteName: "local.menuscores"),
+              d.data(forKey: "MenuScores.preferences") != nil {
+        // The installed app's settings, so the preview shows what it shows.
+        store = ScoreStore(preferences: .load(from: d))
     } else {
         store = ScoreStore()
     }
+    // MENUSCORES_VIEW=h2h renders the head-to-head list instead of the day.
+    let h2h = ProcessInfo.processInfo.environment["MENUSCORES_VIEW"] == "h2h"
+    await store.loadSchedules()
     print("Fetching \(store.preferences.leagues.count) league(s) for \(store.selectedDay)…")
     await store.refresh()
 
@@ -39,6 +46,10 @@ func run() async -> Int32 {
 
     // Pre-warm every crest and badge so the synchronous render draws them.
     var urls: [URL] = []
+    for g in store.headToHead.upcoming + store.headToHead.recent {
+        if let c = g.home.crest { urls.append(c) }
+        if let c = g.away.crest { urls.append(c) }
+    }
     for s in sections {
         if let b = s.league.badge(dark: dark) { urls.append(b) }
         for g in s.games {
@@ -57,12 +68,18 @@ func run() async -> Int32 {
     // ScrollView content, so rendering DropdownView directly yields a blank
     // middle. This mirrors what the real dropdown shows, fully expanded.
     let view = VStack(spacing: 0) {
-        DayTabs(store: store)
-            .padding(.top, 10)
-        Divider().opacity(0.5)
-        SectionList(store: store)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 10)
+        if h2h {
+            HeadToHeadList(store: store)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 10)
+        } else {
+            DayTabs(store: store)
+                .padding(.top, 10)
+            Divider().opacity(0.5)
+            SectionList(store: store)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 10)
+        }
     }
     .frame(width: 340)
     .frame(width: 340)

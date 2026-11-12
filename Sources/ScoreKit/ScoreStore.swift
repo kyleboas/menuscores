@@ -24,6 +24,14 @@ public final class ScoreStore {
         didSet {
             guard preferences != oldValue else { return }
             preferences.save()
+            if preferences.trackedTeamIDs != oldValue.trackedTeamIDs {
+                // A newly starred team's other competitions are unknown until
+                // its schedule is in; fetch that, then the days it plays.
+                Task {
+                    await self.loadSchedules()
+                    await self.refresh()
+                }
+            }
             // Only a change to the league set invalidates what we have cached.
             // Favourites and collapse state are pure display filters, so they
             // must re-render instantly rather than blanking the list while a
@@ -95,8 +103,15 @@ public final class ScoreStore {
 
     // MARK: - Derived views
 
+    /// A game from an enabled league, or one of interest (a followed team,
+    /// or two tracked teams meeting) in any other competition — a cup tie
+    /// shows up without enabling the cup.
     public func games(on day: CivilDay) -> [Game] {
-        (gamesByDay[day] ?? []).filter { preferences.matches($0) }
+        let enabled = preferences.enabledLeagueIDs
+        return (gamesByDay[day] ?? []).filter {
+            (enabled.contains($0.league.id) || preferences.isOfInterest($0))
+                && preferences.matches($0)
+        }
     }
 
     /// The selected day's games grouped into league sections, ordered by the
@@ -141,6 +156,119 @@ public final class ScoreStore {
             .min { $0.start < $1.start }
     }
 
+    // MARK: - Followed teams, across every competition
+
+    /// Each followed team's season, keyed by team id. Drives which extra
+    /// competitions get fetched on a given day, and the head-to-head list.
+    public private(set) var schedules: [String: [Game]] = [:]
+    public private(set) var loadingSchedules = false
+    private var schedulesLoadedAt: Date?
+    /// Fixtures move (TV picks, cup draws), but not by the minute.
+    static let scheduleLifetime: TimeInterval = 6 * 3600
+
+    /// Fetches schedules for followed teams that do not have one yet, and
+    /// all of them once they are older than `scheduleLifetime`.
+    public func loadSchedules() async {
+        guard !loadingSchedules else { return }
+        loadingSchedules = true
+        defer { loadingSchedules = false }
+
+        let ids = preferences.trackedTeamIDs.filter { $0.contains(":") }
+        let stale = schedulesLoadedAt.map { now().timeIntervalSince($0) > Self.scheduleLifetime } ?? true
+        let wanted = stale ? ids : ids.subtracting(schedules.keys)
+        schedules = schedules.filter { ids.contains($0.key) }
+        guard !wanted.isEmpty else { return }
+
+        let provider = self.provider
+        let results = await withTaskGroup(of: (String, [Game]?).self) { group in
+            for id in wanted {
+                group.addTask { (id, try? await provider.schedule(for: id)) }
+            }
+            var out: [(String, [Game]?)] = []
+            for await r in group { out.append(r) }
+            return out
+        }
+        var anyOK = false
+        for (id, games) in results {
+            // A failed fetch keeps the old schedule rather than forgetting it.
+            if let games { schedules[id] = games; anyOK = true }
+        }
+        if stale && anyOK { schedulesLoadedAt = now() }
+    }
+
+    /// Every tracked team's games, once each.
+    private var trackedGames: [Game] {
+        var seen = Set<String>()
+        return schedules.values.joined().filter { seen.insert($0.id).inserted }
+    }
+
+    /// The tracked games worth showing: all of a followed team's, and only
+    /// those of a watched team that meets another tracked team.
+    private var gamesOfInterest: [Game] {
+        trackedGames.filter { preferences.isOfInterest($0) }
+    }
+
+    public enum TrackStatus: Sendable { case none, watching, following }
+
+    public func status(of team: Team) -> TrackStatus {
+        if preferences.favoriteTeamIDs.contains(team.id) { return .following }
+        if preferences.watchingTeamIDs.contains(team.id) { return .watching }
+        return .none
+    }
+
+    /// Puts a team on one list, or neither. The lists never overlap.
+    public func setStatus(_ status: TrackStatus, for team: Team) {
+        var p = preferences
+        p.favoriteTeamIDs.remove(team.id)
+        p.watchingTeamIDs.remove(team.id)
+        switch status {
+        case .following: p.favoriteTeamIDs.insert(team.id)
+        case .watching:  p.watchingTeamIDs.insert(team.id)
+        case .none:      break
+        }
+        preferences = p
+    }
+
+    /// Teams on a list, by name, for the settings window. Taken from their
+    /// own schedules where possible, so a team stays listed after its league
+    /// is switched off.
+    public func teams(_ status: TrackStatus) -> [Team] {
+        var byID: [String: Team] = [:]
+        let all = Array(teamsByLeague.values.joined())
+            + trackedGames.flatMap { [$0.home, $0.away] }
+        for t in all where byID[t.id] == nil && self.status(of: t) == status { byID[t.id] = t }
+        return byID.values.sorted { $0.name < $1.name }
+    }
+
+    /// Games where both sides are tracked teams: recent results and every
+    /// fixture still to come this season. Today's games are taken from the
+    /// scoreboard cache so a live score is current.
+    public var headToHead: (recent: [Game], upcoming: [Game]) {
+        let favs = preferences.trackedTeamIDs
+        let live = Dictionary(gamesByDay.values.joined().map { ($0.id, $0) },
+                              uniquingKeysWith: { a, _ in a })
+        let games = trackedGames
+            .filter { favs.contains($0.home.id) && favs.contains($0.away.id) }
+            .map { live[$0.id] ?? $0 }
+        let cutoff = now().addingTimeInterval(-3 * 3600)
+        let recent = games.filter { $0.state == .final || ($0.start < cutoff && !$0.isLive) }
+            .sorted { $0.start > $1.start }
+        let upcoming = games.filter { !recent.contains($0) }
+            .sorted { $0.start < $1.start }
+        return (Array(recent.prefix(5)), upcoming)
+    }
+
+    /// Which competitions each day needs beyond the enabled ones, from the
+    /// followed teams' schedules.
+    private func extraLeagues(on day: CivilDay) -> [League] {
+        let enabled = preferences.enabledLeagueIDs
+        var seen = Set<String>()
+        return gamesOfInterest
+            .filter { CivilDay($0.start, in: zone) == day }
+            .map(\.league)
+            .filter { !enabled.contains($0.id) && $0.id != "all" && seen.insert($0.id).inserted }
+    }
+
     // MARK: - Teams, for picking favourites
 
     /// Team rosters per league, loaded on demand by the settings window.
@@ -182,16 +310,10 @@ public final class ScoreStore {
         preferences.favoriteTeamIDs = ids
     }
 
-    public func isFavorite(_ team: Team) -> Bool {
-        preferences.favoriteTeamIDs.contains(team.id)
-    }
+    public func isFavorite(_ team: Team) -> Bool { status(of: team) == .following }
 
     public func toggleFavorite(_ team: Team) {
-        if preferences.favoriteTeamIDs.contains(team.id) {
-            preferences.favoriteTeamIDs.remove(team.id)
-        } else {
-            preferences.favoriteTeamIDs.insert(team.id)
-        }
+        setStatus(status(of: team) == .following ? .none : .following, for: team)
     }
 
     // MARK: - Refresh
@@ -204,6 +326,7 @@ public final class ScoreStore {
             while !Task.isCancelled {
                 guard let self else { return }
                 let rolledOver = await MainActor.run { self.syncDay() }
+                await self.loadSchedules()
                 // Full sweep on the first pass and on slow ticks; while games
                 // are live the fast tick only refetches today, because that is
                 // the only day whose scores can change.
@@ -246,7 +369,8 @@ public final class ScoreStore {
         defer { isRefreshing = false }
 
         let leagues = preferences.leagues
-        guard !leagues.isEmpty, !days.isEmpty else {
+        let following = !schedules.isEmpty
+        guard !leagues.isEmpty || following, !days.isEmpty else {
             if leagues.isEmpty { gamesByDay.removeAll() }
             freshness.lastSuccess = now()
             freshness.lastFailure = nil
@@ -260,7 +384,11 @@ public final class ScoreStore {
 
         for day in days {
             var dayGames: [Game] = []
-            for league in leagues {
+            let toFetch = leagues + extraLeagues(on: day)
+            // Nothing to ask the feed for (only followed teams, none playing
+            // in a fetchable competition) is not a failure.
+            if toFetch.isEmpty { anySuccess = true }
+            for league in toFetch {
                 do {
                     dayGames += try await provider.games(on: day, league: league, zone: zone)
                     anySuccess = true
@@ -270,6 +398,10 @@ public final class ScoreStore {
                     if firstError == nil { firstError = .transport(error.localizedDescription) }
                 }
             }
+            // A followed team's game the scoreboards did not return (a
+            // competition with no day scoreboard) still shows, from its
+            // schedule entry.
+            dayGames += gamesOfInterest.filter { CivilDay($0.start, in: zone) == day }
             var seen = Set<String>()
             fetched[day] = dayGames.filter { seen.insert($0.id).inserted }
         }

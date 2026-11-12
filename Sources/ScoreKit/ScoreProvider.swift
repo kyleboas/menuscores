@@ -18,6 +18,14 @@ public protocol ScoreProvider: Sendable {
     /// Every team in a league, for picking favourites. Not limited to teams
     /// playing today.
     func teams(in league: League) async throws -> [Team]
+    /// Every game a team plays this season — results and fixtures — in every
+    /// competition it is entered in, not only the leagues the user enabled.
+    /// `teamID` is sport-qualified, as in `Team.id`.
+    func schedule(for teamID: String) async throws -> [Game]
+}
+
+public extension ScoreProvider {
+    func schedule(for teamID: String) async throws -> [Game] { [] }
 }
 
 /// A calendar date with no time zone attached. Using this instead of `Date`
