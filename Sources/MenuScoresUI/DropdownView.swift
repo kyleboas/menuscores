@@ -13,16 +13,34 @@ public struct DropdownView: View {
 
     private let ticker = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
+    /// Scores by day, or the games between followed teams.
+    @State private var mode: Mode = .scores
+    enum Mode: String, CaseIterable { case scores = "Scores", headToHead = "Head-to-head" }
+
     public var body: some View {
         VStack(spacing: 0) {
             statusBar
-            DayStrip(store: store)
+            Picker("", selection: $mode) {
+                ForEach(Mode.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .controlSize(.small)
+            .padding(.horizontal, 14).padding(.bottom, 8)
+
+            if mode == .scores { DayStrip(store: store) }
             Divider().opacity(0.5)
 
             ScrollView {
-                SectionList(store: store)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 10)
+                Group {
+                    if mode == .scores {
+                        SectionList(store: store)
+                    } else {
+                        HeadToHeadList(store: store)
+                    }
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 10)
             }
             .frame(maxHeight: 460)
 
@@ -296,5 +314,75 @@ public struct SectionList: View {
                 }
             }
         }
+    }
+}
+
+// MARK: - Head-to-head
+
+/// Games where both sides are followed teams, across every competition:
+/// what is coming up this season, then the last few results.
+public struct HeadToHeadList: View {
+    @Bindable var store: ScoreStore
+    public init(store: ScoreStore) { self.store = store }
+
+    public var body: some View {
+        let h2h = store.headToHead
+        VStack(spacing: 10) {
+            if h2h.upcoming.isEmpty && h2h.recent.isEmpty {
+                VStack(spacing: 4) {
+                    Text(store.loadingSchedules ? "Loading schedules…" : "No head-to-head games")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(.secondary)
+                    Text(store.preferences.favoriteTeamIDs.count < 2
+                         ? "Star at least two teams in Settings → Teams."
+                         : "None of your teams play each other this season.")
+                        .font(.system(size: 10)).foregroundStyle(.tertiary)
+                        .multilineTextAlignment(.center)
+                }
+                .frame(maxWidth: .infinity).padding(.vertical, 28)
+            } else {
+                if !h2h.upcoming.isEmpty {
+                    H2HCard(title: "Upcoming", games: h2h.upcoming, store: store)
+                }
+                if !h2h.recent.isEmpty {
+                    H2HCard(title: "Recent", games: h2h.recent, store: store)
+                }
+            }
+        }
+    }
+}
+
+struct H2HCard: View {
+    let title: String
+    let games: [Game]
+    @Bindable var store: ScoreStore
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text(title)
+                .font(.system(size: 12, weight: .semibold))
+                .padding(.horizontal, 12).padding(.top, 9).padding(.bottom, 2)
+            ForEach(Array(games.enumerated()), id: \.element.id) { index, game in
+                if index > 0 { Divider().opacity(0.35).padding(.leading, 12) }
+                VStack(alignment: .leading, spacing: 0) {
+                    Text("\(dateLabel(game.start)) · \(game.league.name)")
+                        .font(.system(size: 10)).foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .padding(.horizontal, 12).padding(.top, 7)
+                    GameRow(game: game, zone: store.zone)
+                }
+            }
+        }
+        .background(Color.primary.opacity(0.06))
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+
+    private func dateLabel(_ d: Date) -> String {
+        let day = CivilDay(d, in: store.zone)
+        if store.dayStrip.contains(day) { return store.label(for: day) }
+        let f = DateFormatter()
+        f.timeZone = store.zone
+        f.dateFormat = "EEE d MMM"
+        return f.string(from: d)
     }
 }

@@ -1,7 +1,8 @@
 import SwiftUI
 import ScoreKit
 
-/// Two tabs: which leagues to follow, and which teams are favourites.
+/// Two tabs: which leagues to show in full, and which teams to follow
+/// wherever they play.
 /// Shown in the standard macOS Settings window, not as a sheet over the
 /// popover — a sheet presented from a popover-hosted view never appeared.
 public struct SettingsView: View {
@@ -13,7 +14,7 @@ public struct SettingsView: View {
             LeaguesTab(store: store)
                 .tabItem { Label("Leagues", systemImage: "list.bullet") }
             FavoritesTab(store: store)
-                .tabItem { Label("Favorites", systemImage: "star") }
+                .tabItem { Label("Teams", systemImage: "star") }
         }
         .frame(width: 420, height: 440)
     }
@@ -84,7 +85,7 @@ struct FavoritesTab: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Toggle("Show only my favorite teams", isOn: $store.preferences.favoritesOnly)
+            Toggle("Show only teams I follow", isOn: $store.preferences.favoritesOnly)
                 .toggleStyle(.checkbox)
 
             HStack(spacing: 6) {
@@ -109,28 +110,24 @@ struct FavoritesTab: View {
                     Text("Loading teams…").font(.system(size: 11)).foregroundStyle(.secondary)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if store.preferences.leagues.isEmpty {
-                Text("Enable a league first, on the Leagues tab.")
-                    .font(.system(size: 11)).foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
+                Text("A starred team's games show in every competition it plays in — cups, Europe, friendlies — even ones not enabled under Leagues.")
+                    .font(.system(size: 11)).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
-                        ForEach(store.preferences.leagues) { league in
-                            let teams = filtered(league)
-                            if !teams.isEmpty {
-                                Section {
-                                    ForEach(teams, id: \.id) { team in
-                                        TeamToggleRow(store: store, team: team)
-                                    }
-                                } header: {
-                                    Text(league.displayName)
-                                        .font(.system(size: 10, weight: .semibold))
-                                        .foregroundStyle(.secondary)
-                                        .frame(maxWidth: .infinity, alignment: .leading)
-                                        .padding(.vertical, 4)
-                                        .background(.background)
+                        ForEach(groups, id: \.title) { group in
+                            Section {
+                                ForEach(group.teams, id: \.id) { team in
+                                    TeamToggleRow(store: store, team: team)
                                 }
+                            } header: {
+                                Text(group.title)
+                                    .font(.system(size: 10, weight: .semibold))
+                                    .foregroundStyle(.secondary)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding(.vertical, 4)
+                                    .background(.background)
                             }
                         }
                     }
@@ -145,10 +142,34 @@ struct FavoritesTab: View {
         }
     }
 
-    private func filtered(_ league: League) -> [Team] {
-        let teams = store.teamsByLeague[league.id] ?? []
-        guard !search.isEmpty else { return teams }
-        return teams.filter { $0.name.localizedCaseInsensitiveContains(search) }
+    /// One entry per team, however many competitions list it: England is in
+    /// friendlies, the Nations League and qualifying, but is one team to
+    /// follow. Followed teams first, then clubs, national teams, and each
+    /// other sport's league.
+    private var groups: [(title: String, teams: [Team])] {
+        func matches(_ t: Team) -> Bool {
+            search.isEmpty || t.name.localizedCaseInsensitiveContains(search)
+        }
+        var placed = Set<String>()
+        var out: [(title: String, teams: [Team])] = []
+        func add(_ title: String, _ teams: [Team]) {
+            let list = teams.filter { matches($0) && placed.insert($0.id).inserted }
+                            .sorted { $0.name < $1.name }
+            if !list.isEmpty { out.append((title, list)) }
+        }
+        add("Following", store.followedTeams)
+        let leagues = store.preferences.leagues
+        func teams(_ ls: [League]) -> [Team] {
+            ls.flatMap { store.teamsByLeague[$0.id] ?? [] }
+        }
+        let national = teams(leagues.filter(\.isInternational))
+        let clubs = teams(leagues.filter { $0.sport == "soccer" && !$0.isInternational })
+        add("Clubs", clubs)
+        add("National teams", national)
+        for l in leagues where l.sport != "soccer" {
+            add(l.name, store.teamsByLeague[l.id] ?? [])
+        }
+        return out
     }
 }
 
