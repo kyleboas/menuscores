@@ -144,8 +144,8 @@ struct FavoritesTab: View {
 
     /// One entry per team, however many competitions list it: England is in
     /// friendlies, the Nations League and qualifying, but is one team to
-    /// follow. Followed teams first, then clubs, national teams, and each
-    /// other sport's league.
+    /// follow. Followed and watched teams first, then clubs by league,
+    /// national teams, and each other sport's league.
     private var groups: [(title: String, teams: [Team])] {
         func matches(_ t: Team) -> Bool {
             search.isEmpty || t.name.localizedCaseInsensitiveContains(search)
@@ -164,8 +164,15 @@ struct FavoritesTab: View {
             ls.flatMap { store.teamsByLeague[$0.id] ?? [] }
         }
         let national = teams(leagues.filter(\.isInternational))
-        let clubs = teams(leagues.filter { $0.sport == "soccer" && !$0.isInternational })
-        add("Clubs", clubs)
+        // Clubs under their domestic league. Continental competitions come
+        // last, so a Champions League side is listed with its own league and
+        // only clubs from leagues not enabled are left under Europe.
+        let clubLeagues = leagues.filter { $0.sport == "soccer" && !$0.isInternational }
+        let domestic = clubLeagues.filter { !$0.id.hasPrefix("uefa.") }
+        let continental = clubLeagues.filter { $0.id.hasPrefix("uefa.") }
+        for l in domestic + continental {
+            add(l.displayName, store.teamsByLeague[l.id] ?? [])
+        }
         add("National teams", national)
         for l in leagues where l.sport != "soccer" {
             add(l.name, store.teamsByLeague[l.id] ?? [])
